@@ -2,15 +2,21 @@
 ربات تلگرام دانلودر اینستاگرام (Pyrogram)
 دانلود ریلز، پست، عکس و استوری با فرستادن لینک
 
-یک وب‌سرور سبک هم روی پورت 8000 اجرا می‌شه تا health check پلتفرم‌های
+یک وب‌سرور سبک هم روی پورت ۸۰۰۰ اجرا می‌شه تا health check پلتفرم‌های
 هاستینگ (Railway / Render / Koyeb و ...) پاس بشه.
 """
+
+import asyncio
+# ====== راه‌حل اصلی برای رفع خطای RuntimeError در پایتون ۳.۱۰ به بالا ======
+# این خط باید قبل از هر import از pyrogram بیاید تا وقتی pyrogram سعی می‌کنه
+# get_event_loop() رو صدا بزنه، یک حلقه‌ی موجود وجود داشته باشه.
+asyncio.set_event_loop(asyncio.new_event_loop())
+# =========================================================================
 
 import os
 import re
 import glob
 import logging
-import asyncio
 import tempfile
 from pathlib import Path
 
