@@ -1,5 +1,9 @@
-__pycache__/
+__pycache__
 *.pyc
 *.session
 *.session-journal
 .env
+Dockerfile
+.git
+.gitignore
+README.md
