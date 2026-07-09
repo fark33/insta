@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ترجیحاً این مقادیر رو به عنوان Environment Variable ست کن، نه داخل کد.
 API_ID = int(os.environ.get("API_ID", "3335796"))          # از my.telegram.org
 API_HASH = os.environ.get("API_HASH", "138b992a0e672e8346d8439c3f42ea78")            # از my.telegram.org
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "5098580833:AAFkfEBZK7-xu57y19V9SGVZtSVBKu0imK8")           # از @BotFather
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "7136875110:AAGr1EREy_qPMgxVbuE4B0cHGVcwWudOrus")           # از @BotFather
 
 IG_USERNAME = os.environ.get("IG_USERNAME", "")       # اختیاری، برای استوری/اکانت خصوصی
 IG_PASSWORD = os.environ.get("IG_PASSWORD", "")
