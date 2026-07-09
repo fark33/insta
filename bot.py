@@ -1,3 +1,7 @@
+"""
+ربات تلگرام دانلودر اینستاگرام (Pyrogram) - نسخه‌ی Webhook
+"""
+
 import asyncio
 asyncio.set_event_loop(asyncio.new_event_loop())
 
@@ -10,8 +14,9 @@ from pathlib import Path
 
 import instaloader
 from aiohttp import web
-from pyrogram import Client, filters, idle
+from pyrogram import Client, filters
 from pyrogram.types import Message
+from pyrogram.webhook import Webhook
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -19,12 +24,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ============ تنظیمات ============
 API_ID = int(os.environ.get("API_ID", "3335796"))
 API_HASH = os.environ.get("API_HASH", "138b992a0e672e8346d8439c3f42ea78")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "7136875110:AAGr1EREy_qPMgxVbuE4B0cHGVcwWudOrus")
 IG_USERNAME = os.environ.get("IG_USERNAME", "")
 IG_PASSWORD = os.environ.get("IG_PASSWORD", "")
 HEALTH_PORT = int(os.environ.get("PORT", "8000"))
+
+# URL سرویس خود را اینجا تنظیم کنید (مطابق با Render)
+RENDER_URL = os.environ.get("RENDER_URL", "https://insta-m37r.onrender.com")
+# ==================================
 
 INSTA_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?instagram\.com/"
@@ -83,6 +93,7 @@ app = Client(
 
 @app.on_message(filters.command("start"))
 async def start_handler(client: Client, message: Message):
+    logger.info(f"دریافت پیام /start از {message.from_user.id}")
     await message.reply_text(
         "سلام 👋\n"
         "لینک پست، ریلز، عکس یا استوری اینستاگرام رو برام بفرست تا دانلودش کنم و برات بفرستم."
@@ -90,6 +101,7 @@ async def start_handler(client: Client, message: Message):
 
 @app.on_message(filters.text & ~filters.command(["start"]))
 async def link_handler(client: Client, message: Message):
+    logger.info(f"دریافت پیام متنی از {message.from_user.id}")
     text = message.text or ""
     match = INSTA_URL_RE.search(text)
     if not match:
@@ -134,18 +146,26 @@ async def send_media(client: Client, message: Message, filepath: str, caption: s
     else:
         await client.send_photo(message.chat.id, filepath, caption=caption)
 
+# ============ وب‌سرور health check و Webhook ============
 async def health(request):
     return web.Response(text="OK")
 
-async def start_health_server():
+async def webhook_handler(request):
+    """دریافت آپدیت از تلگرام و ارسال به Pyrogram"""
+    data = await request.json()
+    await app.process_update(data)
+    return web.Response(text="OK")
+
+async def start_web_server():
     webapp = web.Application()
     webapp.router.add_get("/", health)
     webapp.router.add_get("/health", health)
+    webapp.router.add_post("/webhook", webhook_handler)  # مسیر دریافت آپدیت‌ها
     runner = web.AppRunner(webapp)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", HEALTH_PORT)
     await site.start()
-    logger.info(f"وب‌سرور health check روی پورت {HEALTH_PORT} بالا اومد.")
+    logger.info(f"وب‌سرور روی پورت {HEALTH_PORT} بالا اومد.")
 
 async def main():
     if not (API_ID and API_HASH and BOT_TOKEN):
@@ -153,9 +173,22 @@ async def main():
 
     await app.start()
     logger.info("ربات تلگرام استارت شد.")
-    await start_health_server()
-    await idle()
-    await app.stop()
+
+    # تنظیم Webhook روی URL سرویس
+    webhook_url = f"{https://insta-m37r.onrender.com/}/webhook"
+    await app.set_webhook(webhook_url)
+    logger.info(f"وب‌هوک روی {webhook_url} تنظیم شد.")
+
+    # اجرای وب‌سرور (که health check و webhook رو هندل کنه)
+    await start_web_server()
+
+    # منتظر می‌مانیم تا برنامه متوقف شود (در اینجا نیازی به idle نیست، چون webhook کار می‌کند)
+    try:
+        await asyncio.Event().wait()  # تا ابد منتظر می‌ماند
+    except KeyboardInterrupt:
+        pass
+    finally:
+        await app.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
