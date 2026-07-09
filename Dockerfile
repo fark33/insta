@@ -17,5 +17,6 @@ COPY . .
 EXPOSE 8000
 
 ENV PORT=8000
+ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "bot.py"]
+CMD ["python", "-u", "bot.py"]
