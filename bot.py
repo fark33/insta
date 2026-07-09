@@ -1,9 +1,5 @@
-"""
-ربات تلگرام دانلودر اینستاگرام (Pyrogram)
-"""
-
 import asyncio
-asyncio.set_event_loop(asyncio.new_event_loop())   # حلقه‌ی پیش‌فرض برای پایتون ۳.۱۰+
+asyncio.set_event_loop(asyncio.new_event_loop())
 
 import os
 import re
@@ -23,14 +19,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ============ تنظیمات ============
 API_ID = int(os.environ.get("API_ID", "3335796"))
 API_HASH = os.environ.get("API_HASH", "138b992a0e672e8346d8439c3f42ea78")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "7136875110:AAGr1EREy_qPMgxVbuE4B0cHGVcwWudOrus")
 IG_USERNAME = os.environ.get("IG_USERNAME", "")
 IG_PASSWORD = os.environ.get("IG_PASSWORD", "")
 HEALTH_PORT = int(os.environ.get("PORT", "8000"))
-# ==================================
 
 INSTA_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?instagram\.com/"
@@ -140,7 +134,6 @@ async def send_media(client: Client, message: Message, filepath: str, caption: s
     else:
         await client.send_photo(message.chat.id, filepath, caption=caption)
 
-# ============ وب‌سرور health check ============
 async def health(request):
     return web.Response(text="OK")
 
@@ -161,7 +154,7 @@ async def main():
     await app.start()
     logger.info("ربات تلگرام استارت شد.")
     await start_health_server()
-    await idle()   # <- این خط باید باشد تا ربات به آپدیت‌ها گوش دهد
+    await idle()
     await app.stop()
 
 if __name__ == "__main__":
