@@ -7,13 +7,12 @@ from pyrogram.types import InputMediaPhoto, InputMediaVideo
 from fastapi import FastAPI
 import uvicorn
 
-# --- تنظیمات ---
+# تنظیمات محیطی
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "@YourBot")
 
-# ایجاد پوشه downloads
 if not os.path.exists("downloads"):
     os.makedirs("downloads")
 
@@ -32,7 +31,8 @@ bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 def download_media(url):
     ydl_opts = {
         'format': 'best',
-        'outtmpl': 'downloads/%(id)s_%(index)s.%(ext)s',
+        # الگوی ساده‌تر برای جلوگیری از خطای نام‌گذاری
+        'outtmpl': 'downloads/%(id)s.%(ext)s', 
         'quiet': True,
         'no_warnings': True,
     }
@@ -42,14 +42,17 @@ def download_media(url):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            # تشخیص اینکه آیا پست آلبومی است یا تکی
             entries = info.get('entries', [info])
+            
             downloaded_files = []
             for entry in entries:
-                files = glob.glob(f"downloads/{entry['id']}*")
+                # جستجوی فایل‌هایی که با ID شروع می‌شوند
+                files = glob.glob(f"downloads/{entry['id']}.*")
                 downloaded_files.extend(files)
             return downloaded_files
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Download Error: {e}")
         return []
 
 def chunked_list(lst, n):
@@ -72,12 +75,10 @@ def start(client, message):
 def downloader(client, message):
     text = message.text.strip()
     
-    # تشخیص نوع ورودی
     if text.startswith("@"):
         url = f"https://www.instagram.com/{text.replace('@', '')}/"
     elif "instagram.com" in text:
         url = text
-    # بررسی اینکه آیا کاربر لینک فرستاده ولی اینستاگرامی نیست؟
     elif text.startswith("http") or "www." in text:
         message.reply_text("❌ من این لینک ها را پشتیبانی نمیکنم !!")
         return
@@ -100,9 +101,11 @@ def downloader(client, message):
             else:
                 media_objects.append(InputMediaPhoto(path))
         
+        # تعیین کپشن کلی
+        caption = f"📥 دانلود شد\n\n✅ {BOT_USERNAME}"
+
         # ارسال تکی
         if len(media_objects) == 1:
-            caption = f"📥 دانلود شد\n\n✅ {BOT_USERNAME}"
             if isinstance(media_objects[0], InputMediaVideo):
                 client.send_video(message.chat.id, video=file_paths[0], caption=caption)
             else:
@@ -111,8 +114,9 @@ def downloader(client, message):
         # ارسال آلبومی
         else:
             for i, batch in enumerate(chunked_list(media_objects, 10)):
-                caption = f"📥 دانلود شد (بخش {i+1})\n\n✅ {BOT_USERNAME}" if i == 0 else f"📥 ادامه دانلود (بخش {i+1})"
-                client.send_media_group(message.chat.id, media=batch, caption=caption)
+                # تزریق کپشن به اولین آیتمِ هر دسته
+                batch[0].caption = f"{caption} (بخش {i+1})" if len(media_objects) > 10 else caption
+                client.send_media_group(message.chat.id, media=batch)
         
         # پاکسازی
         for path in file_paths:
