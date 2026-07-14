@@ -10,8 +10,9 @@ import uvicorn
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
+BOT_USERNAME = os.environ["BOT_USERNAME"] # اضافه شد
 
-# ایجاد پوشه دانلود برای جلوگیری از شلوغی
+# ایجاد پوشه downloads اگر وجود ندارد
 if not os.path.exists("downloads"):
     os.makedirs("downloads")
 
@@ -28,63 +29,61 @@ def run_web():
 bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 def download_media(url):
-    """تابع دانلود با استفاده از yt-dlp و تنظیمات کوکی"""
     ydl_opts = {
         'format': 'best',
         'outtmpl': 'downloads/%(id)s.%(ext)s',
         'quiet': True,
         'no_warnings': True,
     }
-    # استفاده از فایل کوکی در صورت وجود
     if os.path.exists('cookies.txt'):
         ydl_opts['cookiefile'] = 'cookies.txt'
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        # پیدا کردن فایلی که دانلود شده است
-        files = glob.glob(f"downloads/{info['id']}.*")
-        return files[0] if files else None
+        try:
+            info = ydl.extract_info(url, download=True)
+            files = glob.glob(f"downloads/{info['id']}.*")
+            return files[0] if files else None
+        except Exception:
+            return None
 
 @bot.on_message(filters.command("start"))
 def start(client, message):
-    message.reply_text("✅ ربات دانلودر اینستاگرام فعال است.\n\nلینک پست، ریلز، استوری یا آیدی (مانند @username) را بفرستید.")
+    message.reply_text("✅ ربات آماده است. لینک اینستاگرام یا آیدی (مثلاً @username) را بفرستید.")
 
 @bot.on_message(filters.text & ~filters.command("start"))
 def downloader(client, message):
     text = message.text.strip()
     
-    # تشخیص لینک یا آیدی
     if text.startswith("@"):
         url = f"https://www.instagram.com/{text.replace('@', '')}/"
     elif "instagram.com" in text:
         url = text
     else:
-        message.reply_text("❌ فرمت ورودی اشتباه است. لطفاً لینک یا آیدی معتبر بفرستید.")
+        message.reply_text("❌ لطفاً لینک یا آیدی معتبر اینستاگرام بفرستید.")
         return
 
     msg = message.reply_text("⏳ در حال پردازش و دانلود...")
     
-    try:
-        file_path = download_media(url)
-        
-        if file_path:
-            # تشخیص نوع فایل و ارسال
-            if file_path.endswith(('.mp4', '.mov')):
-                client.send_video(message.chat.id, video=file_path, caption="📥 دانلود شده توسط ربات")
-            else:
-                client.send_photo(message.chat.id, photo=file_path, caption="📥 دانلود شده توسط ربات")
+    file_path = download_media(url)
+    
+    if file_path:
+        try:
+            # استفاده از BOT_USERNAME در کپشن
+            caption = f"📥 دانلود شده توسط ربات\n\n✅ {BOT_USERNAME}"
             
-            # پاکسازی فایل از سرور
+            if file_path.endswith(('.mp4', '.mov')):
+                client.send_video(message.chat.id, video=file_path, caption=caption)
+            else:
+                client.send_photo(message.chat.id, photo=file_path, caption=caption)
+            
             os.remove(file_path)
             msg.delete()
-        else:
-            msg.edit_text("❌ محتوا یافت نشد. ممکن است اکانت خصوصی باشد یا لینک معتبر نباشد.")
-            
-    except Exception as e:
-        msg.edit_text(f"⚠️ خطایی رخ داد: {str(e)}")
+        except Exception as e:
+            msg.edit_text(f"⚠️ خطایی در ارسال فایل رخ داد: {str(e)}")
+    else:
+        msg.edit_text("❌ متأسفانه نتوانستم محتوا را دانلود کنم.")
 
 if __name__ == "__main__":
-    # اجرای همزمان وب‌سرور و ربات
     threading.Thread(target=run_web, daemon=True).start()
     print("Bot Started...")
     bot.run()
