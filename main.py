@@ -1,24 +1,39 @@
 import os
+import threading
 from pyrogram import Client, filters
+from fastapi import FastAPI
+import uvicorn
 
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
-app = Client(
+app_web = FastAPI()
+
+@app_web.get("/")
+def home():
+    return {"status": "Bot is running"}
+
+def run_web():
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app_web, host="0.0.0.0", port=port)
+
+bot = Client(
     "bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
-@app.on_message(filters.command("start"))
+@bot.on_message(filters.command("start"))
 def start(client, message):
-    message.reply_text("✅ ربات با موفقیت روی Render اجرا شده است!")
+    message.reply_text("✅ ربات فعال است")
 
-@app.on_message(filters.text)
+@bot.on_message(filters.text)
 def echo(client, message):
-    message.reply_text(f"شما گفتید:\n{message.text}")
+    message.reply_text(f"گفتی: {message.text}")
 
-print("Bot Started...")
-app.run()
+if __name__ == "__main__":
+    threading.Thread(target=run_web, daemon=True).start()
+    print("Bot Started...")
+    bot.run()
