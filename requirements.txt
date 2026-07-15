@@ -1,6 +1,6 @@
-pyrogram==2.0.106
+pyrogram
 tgcrypto
-python-dotenv
+yt-dlp
+requests
 fastapi
 uvicorn
-yt-dlp
