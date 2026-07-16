@@ -1,11 +1,38 @@
 import os
 import time
 import asyncio
+import threading
 import yt_dlp
 import requests
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
+
+
+# ================= سرور HTTP فیک فقط برای Render Web Service =================
+# Render برای Web Service انتظار داره پورتی باز باشه، وگرنه
+# فکر می‌کنه سرویس بالا نیومده. این سرور فقط همین پورت رو باز نگه می‌داره
+# و هیچ ربطی به منطق ربات نداره.
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+    def log_message(self, format, *args):
+        pass  # جلوگیری از شلوغی لاگ‌ها با درخواست‌های health-check
+
+
+def _run_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    server.serve_forever()
+
+
+threading.Thread(target=_run_health_server, daemon=True).start()
 
 
 # ================= تنظیمات =================
