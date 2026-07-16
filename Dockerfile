@@ -1,22 +1,29 @@
-# استفاده از نسخه سبک پایتون به عنوان ایمیج پایه
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-# نصب ابزار ffmpeg که برای تبدیل و استخراج صدا توسط yt-dlp حیاتی است
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# جلوگیری از سوالات تعاملی apt در حین build
+ENV DEBIAN_FRONTEND=noninteractive
 
-# تعیین پوشه کاری داخل کانتینر
 WORKDIR /app
 
-# کپی کردن لیست نیازمندی‌ها
+# نصب ffmpeg (برای استخراج/تبدیل صدا) و aria2 (برای دانلود چندکانکشنه)
+# این دو مورد روی ایمیج پایه پایتون پیش‌فرض نصب نیستن و علت اصلی
+# ارور دادن ربات وقتی از کولب خارج میشه همین هستن.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ffmpeg \
+        aria2 \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# کپی و نصب وابستگی‌های پایتون
 COPY requirements.txt .
 
-# نصب کتابخانه‌های پایتون
-RUN pip install --no-cache-dir -r requirements.txt
+# --upgrade تضمین می‌کنه yt-dlp همیشه آخرین نسخه‌ی موجود در PyPI نصب بشه
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --upgrade -r requirements.txt
 
-# کپی کردن کد اصلی ربات
-COPY bot.py .
+# کپی کد اصلی ربات
+COPY main.py .
 
-# دستور اجرای ربات هنگام روشن شدن کانتینر
-CMD ["python", "bot.py"]
+# اجرای ربات
+CMD ["python", "main.py"]
