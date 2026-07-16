@@ -149,7 +149,7 @@ async def start(client, message):
 تا برات فایلشو بفرستم💗😍
 
 🖍️ سازنده ربات :
-<a href="https://telegram.me/farshidband">FﾑRSみɨo-BﾑŊo</a></b>
+<a href="https://telegram.me/farshidband">FﾑRSみɨo-BﾑŊo90</a></b>
 """
 
     await message.reply(
