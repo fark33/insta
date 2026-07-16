@@ -261,14 +261,18 @@ async def main():
         logger.error("❌ Critical: Credentials are not configured!")
         return
 
+    # 🟢 حذف وب‌هوک از طریق ریکوئست مستقیم و امن به تلگرام (بدون کرش کردن)
+    try:
+        logger.info("🔧 Deleting any old webhooks via HTTP Request...")
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
+        res = requests.get(url, params={"drop_pending_updates": "true"}, timeout=5)
+        logger.info(f"Webhook deletion status: {res.status_code} - {res.text}")
+    except Exception as webhook_error:
+        logger.warning(f"Could not clear webhook via HTTP: {webhook_error}")
+
     try:
         logger.info("Attempting to connect to Telegram...")
         await app.start()
-        
-        # 🟢 رفع مشکل اساسی: حذف وب‌هوک‌های قدیمی تلگرام
-        logger.info("🔧 Deleting any old webhooks to enable long polling...")
-        await app.delete_webhook(drop_pending_updates=True)
-        
         logger.info("✅ Music Bot is running successfully with long polling active!")
         
         # بیدار نگه داشتن دائم برنامه
