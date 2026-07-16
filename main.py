@@ -2,6 +2,7 @@ import os
 import time
 import asyncio
 import threading
+import logging
 import yt_dlp
 import requests
 
@@ -10,26 +11,37 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 
+# ================= تنظیمات و پیکربندی لاگ‌ها =================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
+logger = logging.getLogger("MusicBot")
+
+# تنظیم سطح لاگ برای پایروگرام جهت نمایش جزئیات اتصال
+logging.getLogger("pyrogram").setLevel(logging.INFO)
+
 
 # ================= سرور HTTP فیک فقط برای Render Web Service =================
-# Render برای Web Service انتظار داره پورتی باز باشه، وگرنه
-# فکر می‌کنه سرویس بالا نیومده. این سرور فقط همین پورت رو باز نگه می‌داره
-# و هیچ ربطی به منطق ربات نداره.
 
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is running")
+        self.wfile.write(b"Bot health check OK")
 
     def log_message(self, format, *args):
-        pass  # جلوگیری از شلوغی لاگ‌ها با درخواست‌های health-check
+        pass
 
 
 def _run_health_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
-    server.serve_forever()
+    logger.info(f"Starting health check server on port {port}...")
+    try:
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"Error starting health check server: {e}")
 
 
 threading.Thread(target=_run_health_server, daemon=True).start()
@@ -37,26 +49,20 @@ threading.Thread(target=_run_health_server, daemon=True).start()
 
 # =========================================================================
 # تنظیمات ربات
-# تو می‌توانی مقادیر را مستقیماً داخل کوتیشن‌های دوم بنویسی (به عنوان زاپاس)
-# یا آن‌ها را در بخش Environment Variables پنل رندر ست کنی.
 # =========================================================================
 
-# توکن ربات تلگرام شما
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-
-# آیدی ربات شما (حتماً با @ شروع شود)
 BOT_ID = os.environ.get("BOT_ID", "@YOUR_BOT_ID")
 
-# کد عددی API_ID (اگر دستی می‌نویسی، کوتیشن‌ها را پاک کن و عدد بگذار، مثل: 123456)
 try:
     API_ID = int(os.environ.get("API_ID", "YOUR_API_ID_HERE"))
 except ValueError:
     API_ID = 0
 
-# کد هش API_HASH شما
 API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH_HERE")
 
 
+# ایجاد کلاینت تلگرام
 app = Client(
     "MusicBot",
     api_id=API_ID,
@@ -68,86 +74,69 @@ app = Client(
 # ================= سیستم آنتی‌اسپم (Cooldown) =================
 
 user_cooldowns = {}
-COOLDOWN_SECONDS = 3  # مقدار ثانیه برای محدودیت ارسال پیام رگباری
+COOLDOWN_SECONDS = 3
 
 
 # ================= جستجوی آهنگ (iTunes API) =================
 
 async def search_song(query):
-
     def _search():
         try:
+            logger.info(f"Searching iTunes for query: {query}")
             data = requests.get(
                 "https://itunes.apple.com/search",
-                params={
-                    "term": query,
-                    "media": "music",
-                    "limit": 1
-                },
+                params={"term": query, "media": "music", "limit": 1},
                 timeout=5
             ).json()
 
             if data.get("resultCount"):
                 item = data["results"][0]
-                return (
-                    item.get("trackName", "")
-                    + " - "
-                    + item.get("artistName", "")
-                )
-        except Exception:
-            pass
+                track = item.get("trackName", "")
+                artist = item.get("artistName", "")
+                logger.info(f"iTunes found track: {track} - {artist}")
+                return f"{track} - {artist}"
+        except Exception as e:
+            logger.warning(f"iTunes search failed: {e}")
         return query
 
     return await asyncio.to_thread(_search)
 
 
-# ================= دانلود هوشمند و سریع از یوتیوب =================
+# ================= دانلود از یوتیوب =================
 
 async def download_music(query, user_id):
-
     output_filename = f"music_{user_id}.m4a"
 
     def _download():
         try:
-            # حذف فایل‌های قدیمی احتمالی (هر پسوندی)
+            logger.info(f"Preparing download for user {user_id} - Query: {query}")
             for ext in ("m4a", "webm", "opus", "part"):
                 path = f"music_{user_id}.{ext}"
                 if os.path.exists(path):
                     os.remove(path)
 
             ydl_opts = {
-                # اولویت با فرمت m4a آماده تا نیازی به ترنسکد سنگین نباشه
                 'format': 'bestaudio[ext=m4a]/bestaudio/best',
                 'outtmpl': f'music_{user_id}.%(ext)s',
                 'noplaylist': True,
                 'quiet': True,
                 'no_warnings': True,
                 'noprogress': True,
-
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'm4a',
                 }],
-
-                # فقط کلاینت اندروید: سریع‌تر از تست پشت‌سرهم چند کلاینت
                 'extractor_args': {
                     'youtube': {
                         'player_client': ['android']
                     }
                 },
-
-                # دانلود موازی فرگمنت‌ها برای فرمت‌های DASH/HLS
                 'concurrent_fragment_downloads': 8,
-
-                # اجازه‌ی درخواست‌های range موازی برای فایل http مستقیم
                 'http_chunk_size': 10 * 1024 * 1024,
-
-                # اگر aria2c نصب باشه از دانلودر چندکانکشنه استفاده کن
                 'external_downloader': 'aria2c',
                 'external_downloader_args': {
                     'aria2c': ['-x', '16', '-s', '16', '-k', '1M']
                 },
-
                 'retries': 3,
                 'socket_timeout': 10,
             }
@@ -156,21 +145,22 @@ async def download_music(query, user_id):
                 ydl.extract_info(f"ytsearch1:{query}", download=True)
 
             if os.path.exists(output_filename):
+                logger.info(f"Download successful: {output_filename}")
                 return output_filename
 
         except Exception as e:
-            print(f"❌ Error during download: {e}")
-
-            # تلاش دوباره بدون aria2c اگر نصب نبود یا خطا داد
+            logger.error(f"Error during standard download: {e}")
             try:
+                logger.info("Attempting fallback download without aria2c...")
                 ydl_opts.pop('external_downloader', None)
                 ydl_opts.pop('external_downloader_args', None)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.extract_info(f"ytsearch1:{query}", download=True)
                 if os.path.exists(output_filename):
+                    logger.info(f"Fallback download successful: {output_filename}")
                     return output_filename
             except Exception as e2:
-                print(f"❌ Retry error: {e2}")
+                logger.error(f"Fallback download also failed: {e2}")
 
         return None
 
@@ -180,10 +170,8 @@ async def download_music(query, user_id):
 # ================= اجرای هم‌زمان جست‌وجو + دانلود =================
 
 async def process_request(query, user_id):
-    # اجرای موازی تسک‌ها برای به حداقل رساندن زمان پاسخ‌دهی
     song_task = asyncio.create_task(search_song(query))
     file_task = asyncio.create_task(download_music(query, user_id))
-
     song, file = await asyncio.gather(song_task, file_task)
     return song, file
 
@@ -192,7 +180,6 @@ async def process_request(query, user_id):
 
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
-
     user_id = message.from_user.id
     current_time = time.time()
 
@@ -200,8 +187,8 @@ async def start(client, message):
         return
 
     user_cooldowns[user_id] = current_time
-
     name = message.from_user.first_name
+    logger.info(f"User {user_id} ({name}) sent /start")
 
     text = f"""
 <b>👋 سلام {name} عزیز خوش آمدید❤️
@@ -226,7 +213,6 @@ async def start(client, message):
 
 @app.on_message(filters.private & filters.text)
 async def music(client, message):
-
     query = message.text.strip()
     user_id = message.from_user.id
 
@@ -234,38 +220,32 @@ async def music(client, message):
         return
 
     current_time = time.time()
-
     if current_time - user_cooldowns.get(user_id, 0) < COOLDOWN_SECONDS:
         return
 
     user_cooldowns[user_id] = current_time
+    logger.info(f"User {user_id} requested: {query}")
 
     status = await message.reply("🔎 در حال جست‌وجو و دانلود...")
-
     song, file = await process_request(query, user_id)
 
     if file:
-
+        logger.info(f"Uploading audio file {file} to Telegram for user {user_id}")
         await message.reply_audio(
             audio=file,
             performer="IR_BOTZ™",
             title=song,
-            caption=f"""
-🎵 {song}
-
-✅ {BOT_ID}
-"""
+            caption=f"🎵 {song}\n\n✅ {BOT_ID}"
         )
-
         try:
             os.remove(file)
-        except Exception:
-            pass
+            logger.info(f"Cleaned up temporary file: {file}")
+        except Exception as e:
+            logger.warning(f"Could not remove temp file: {e}")
 
         await status.delete()
-
     else:
-
+        logger.warning(f"Could not find or download music for query: {query}")
         await status.edit(
             "❌ متاسفانه خطایی در دانلود پیش آمد. لطفاً دوباره تلاش کنید."
         )
@@ -274,16 +254,23 @@ async def music(client, message):
 # ================= اجرای پروژه =================
 
 async def main():
+    logger.info("Starting bot initialization...")
+    
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or API_ID == 0:
-        print("❌ خطا: لطفاً توکن، API_ID و API_HASH خود را در کدهای بالا یا در بخش Environment Variables رندر تنظیم کنید!")
+        logger.error("❌ Critical: Credentials are not configured! Please check your environment variables.")
         return
 
-    await app.start()
-    print("✅ Music Bot is running successfully!")
-    
-    # متد idle کمک می‌کند سشن به صورت کاملاً امن با خاموش شدن سرور بسته شود
-    await idle()
-    await app.stop()
+    try:
+        logger.info("Attempting to connect to Telegram...")
+        await app.start()
+        logger.info("✅ Music Bot is running successfully!")
+        await idle()
+    except Exception as e:
+        logger.exception("❌ A critical error occurred while starting the bot:")
+    finally:
+        logger.info("Stopping Pyrogram client...")
+        await app.stop()
+        logger.info("Pyrogram client stopped.")
 
 
 if __name__ == "__main__":
