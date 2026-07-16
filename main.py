@@ -17,12 +17,10 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
 logger = logging.getLogger("MusicBot")
-
-# تنظیم سطح لاگ برای پایروگرام جهت نمایش جزئیات اتصال
 logging.getLogger("pyrogram").setLevel(logging.INFO)
 
 
-# ================= سرور HTTP فیک فقط برای Render Web Service =================
+# ================= سرور HTTP فیک برای Render =================
 
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -61,7 +59,6 @@ except ValueError:
 
 API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH_HERE")
 
-
 # ایجاد کلاینت تلگرام
 app = Client(
     "MusicBot",
@@ -70,11 +67,18 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-
-# ================= سیستم آنتی‌اسپم (Cooldown) =================
-
 user_cooldowns = {}
 COOLDOWN_SECONDS = 3
+
+
+# ================= تست اتصال و دریافت پیام =================
+
+@app.on_message(filters.all, group=-1)
+async def monitor_updates(client, message):
+    """این تابع هر پیامی که به ربات برسد را سریعاً در لاگ رندر چاپ می‌کند"""
+    user = message.from_user
+    username = f"@{user.username}" if user and user.username else "No Username"
+    logger.info(f"📥 [پیام دریافت شد] از طرف: {user.id if user else 'ناشناس'} ({username}) | متن پیام: {message.text}")
 
 
 # ================= جستجوی آهنگ (iTunes API) =================
@@ -167,8 +171,6 @@ async def download_music(query, user_id):
     return await asyncio.to_thread(_download)
 
 
-# ================= اجرای هم‌زمان جست‌وجو + دانلود =================
-
 async def process_request(query, user_id):
     song_task = asyncio.create_task(search_song(query))
     file_task = asyncio.create_task(download_music(query, user_id))
@@ -188,7 +190,7 @@ async def start(client, message):
 
     user_cooldowns[user_id] = current_time
     name = message.from_user.first_name
-    logger.info(f"User {user_id} ({name}) sent /start")
+    logger.info(f"Processing /start command for user {user_id}")
 
     text = f"""
 <b>👋 سلام {name} عزیز خوش آمدید❤️
@@ -224,7 +226,6 @@ async def music(client, message):
         return
 
     user_cooldowns[user_id] = current_time
-    logger.info(f"User {user_id} requested: {query}")
 
     status = await message.reply("🔎 در حال جست‌وجو و دانلود...")
     song, file = await process_request(query, user_id)
@@ -257,15 +258,20 @@ async def main():
     logger.info("Starting bot initialization...")
     
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or API_ID == 0:
-        logger.error("❌ Critical: Credentials are not configured! Please check your environment variables.")
+        logger.error("❌ Critical: Credentials are not configured!")
         return
 
     try:
         logger.info("Attempting to connect to Telegram...")
         await app.start()
-        logger.info("✅ Music Bot is running successfully!")
         
-        # بیدار نگه داشتن ربات به صورت دائمی و امن بدون تداخل با سیگنال‌های رندر
+        # 🟢 رفع مشکل اساسی: حذف وب‌هوک‌های قدیمی تلگرام
+        logger.info("🔧 Deleting any old webhooks to enable long polling...")
+        await app.delete_webhook(drop_pending_updates=True)
+        
+        logger.info("✅ Music Bot is running successfully with long polling active!")
+        
+        # بیدار نگه داشتن دائم برنامه
         while True:
             await asyncio.sleep(3600)
             
@@ -276,11 +282,10 @@ async def main():
     finally:
         logger.info("Stopping Pyrogram client...")
         try:
-            # جلوگیری از مسدود شدن تسک‌ها در زمان خروج با فلگ block=False
             await app.stop(block=False)
             logger.info("Pyrogram client stopped successfully.")
         except Exception as stop_error:
-            logger.debug(f"Ignored minor loop cleanup error on exit: {stop_error}")
+            logger.debug(f"Ignored loop cleanup error on exit: {stop_error}")
 
 
 if __name__ == "__main__":
