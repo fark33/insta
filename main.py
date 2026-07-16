@@ -1,146 +1,109 @@
 import os
 import time
 import asyncio
-import threading
-import logging
 import yt_dlp
 import requests
-
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 
-# ================= تنظیمات و پیکربندی لاگ‌ها =================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-)
-logger = logging.getLogger("MusicBot")
-logging.getLogger("pyrogram").setLevel(logging.INFO)
+
+# ================= تنظیمات =================
+# توکن از Environment Variable خونده میشه (روی Render توی بخش Environment ست کنید)
+# اگه ست نشده باشه، از همین مقدار پیش‌فرض استفاده میشه.
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "5098580833:AAEzriKZYpbJOljEwP-8KrOsYlGY-hRyDXA")
+BOT_ID = "@YOUR_BOT_ID"
+
+API_ID = int(os.environ.get("API_ID", 3335796))
+API_HASH = os.environ.get("API_HASH", "138b992a0e672e8346d8439c3f42ea78")
 
 
-# ================= سرور HTTP فیک برای Render =================
-
-class _HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot health check OK")
-
-    def log_message(self, format, *args):
-        pass
-
-
-def _run_health_server():
-    port = int(os.environ.get("PORT", 10000))
-    logger.info(f"Starting health check server on port {port}...")
-    try:
-        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
-        server.serve_forever()
-    except Exception as e:
-        logger.error(f"Error starting health check server: {e}")
-
-
-threading.Thread(target=_run_health_server, daemon=True).start()
-
-
-# =========================================================================
-# تنظیمات ربات
-# =========================================================================
-
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-BOT_ID = os.environ.get("BOT_ID", "@YOUR_BOT_ID")
-
-try:
-    API_ID = int(os.environ.get("API_ID", "YOUR_API_ID_HERE"))
-except ValueError:
-    API_ID = 0
-
-API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH_HERE")
-
-# ایجاد کلاینت تلگرام
 app = Client(
     "MusicBot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN
+    bot_token=BOT_TOKEN,
+    workers=8,  # افزایش تعداد workerها برای پردازش هم‌زمان سریع‌تر
 )
 
+
+# ================= سیستم آنتی‌اسپم (Cooldown) =================
+
 user_cooldowns = {}
-COOLDOWN_SECONDS = 3
-
-
-# ================= تست اتصال و دریافت پیام =================
-
-@app.on_message(filters.all, group=-1)
-async def monitor_updates(client, message):
-    """این تابع هر پیامی که به ربات برسد را سریعاً در لاگ رندر چاپ می‌کند"""
-    user = message.from_user
-    username = f"@{user.username}" if user and user.username else "No Username"
-    logger.info(f"📥 [پیام دریافت شد] از طرف: {user.id if user else 'ناشناس'} ({username}) | متن پیام: {message.text}")
+COOLDOWN_SECONDS = 3  # مقدار ثانیه برای محدودیت ارسال پیام رگباری
 
 
 # ================= جستجوی آهنگ (iTunes API) =================
 
 async def search_song(query):
+
     def _search():
         try:
-            logger.info(f"Searching iTunes for query: {query}")
             data = requests.get(
                 "https://itunes.apple.com/search",
-                params={"term": query, "media": "music", "limit": 1},
+                params={
+                    "term": query,
+                    "media": "music",
+                    "limit": 1
+                },
                 timeout=5
             ).json()
 
             if data.get("resultCount"):
                 item = data["results"][0]
-                track = item.get("trackName", "")
-                artist = item.get("artistName", "")
-                logger.info(f"iTunes found track: {track} - {artist}")
-                return f"{track} - {artist}"
-        except Exception as e:
-            logger.warning(f"iTunes search failed: {e}")
+                return (
+                    item.get("trackName", "")
+                    + " - "
+                    + item.get("artistName", "")
+                )
+        except Exception:
+            pass
         return query
 
     return await asyncio.to_thread(_search)
 
 
-# ================= دانلود از یوتیوب =================
+
+# ================= دانلود هوشمند و سریع =================
 
 async def download_music(query, user_id):
+
     output_filename = f"music_{user_id}.m4a"
 
     def _download():
+        t0 = time.time()
         try:
-            logger.info(f"Preparing download for user {user_id} - Query: {query}")
-            for ext in ("m4a", "webm", "opus", "part"):
-                path = f"music_{user_id}.{ext}"
-                if os.path.exists(path):
-                    os.remove(path)
+            if os.path.exists(output_filename):
+                os.remove(output_filename)
 
             ydl_opts = {
-                'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                # فرمتی که خودش m4a هست رو اول امتحان کن تا ffmpeg
+                # فقط remux سریع انجام بده، نه ری‌اِنکود واقعی
+                'format': 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best',
                 'outtmpl': f'music_{user_id}.%(ext)s',
                 'noplaylist': True,
                 'quiet': True,
                 'no_warnings': True,
-                'noprogress': True,
+
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'm4a',
+                    'preferredquality': '0',
                 }],
+
+                # فقط یک کلاینت سریع و پایدار (به‌جای تست چندتایی که وقت‌گیره)
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android']
+                        'player_client': ['android'],
                     }
                 },
-                'concurrent_fragment_downloads': 8,
-                'http_chunk_size': 10 * 1024 * 1024,
-                'external_downloader': 'aria2c',
-                'external_downloader_args': {
-                    'aria2c': ['-x', '16', '-s', '16', '-k', '1M']
-                },
+
+                # دانلود موازی قطعات فایل صوتی
+                'concurrent_fragment_downloads': 4,
+
+                # چانک‌های بزرگ‌تر برای دور زدن throttle یوتیوب
+                'http_chunk_size': 10485760,  # 10MB
+
                 'retries': 3,
                 'socket_timeout': 10,
             }
@@ -149,39 +112,24 @@ async def download_music(query, user_id):
                 ydl.extract_info(f"ytsearch1:{query}", download=True)
 
             if os.path.exists(output_filename):
-                logger.info(f"Download successful: {output_filename}")
+                print(f"⏱️ دانلود در {time.time() - t0:.2f} ثانیه انجام شد")
                 return output_filename
 
         except Exception as e:
-            logger.error(f"Error during standard download: {e}")
-            try:
-                logger.info("Attempting fallback download without aria2c...")
-                ydl_opts.pop('external_downloader', None)
-                ydl_opts.pop('external_downloader_args', None)
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.extract_info(f"ytsearch1:{query}", download=True)
-                if os.path.exists(output_filename):
-                    logger.info(f"Fallback download successful: {output_filename}")
-                    return output_filename
-            except Exception as e2:
-                logger.error(f"Fallback download also failed: {e2}")
+            print(f"❌ Error during download: {e}")
 
         return None
 
     return await asyncio.to_thread(_download)
 
 
-async def process_request(query, user_id):
-    song_task = asyncio.create_task(search_song(query))
-    file_task = asyncio.create_task(download_music(query, user_id))
-    song, file = await asyncio.gather(song_task, file_task)
-    return song, file
 
 
 # ================= START =================
 
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
+
     user_id = message.from_user.id
     current_time = time.time()
 
@@ -189,8 +137,8 @@ async def start(client, message):
         return
 
     user_cooldowns[user_id] = current_time
+
     name = message.from_user.first_name
-    logger.info(f"Processing /start command for user {user_id}")
 
     text = f"""
 <b>👋 سلام {name} عزیز خوش آمدید❤️
@@ -211,10 +159,13 @@ async def start(client, message):
     )
 
 
+
+
 # ================= دریافت آهنگ =================
 
 @app.on_message(filters.private & filters.text)
 async def music(client, message):
+
     query = message.text.strip()
     user_id = message.from_user.id
 
@@ -222,74 +173,53 @@ async def music(client, message):
         return
 
     current_time = time.time()
+
     if current_time - user_cooldowns.get(user_id, 0) < COOLDOWN_SECONDS:
         return
 
     user_cooldowns[user_id] = current_time
 
-    status = await message.reply("🔎 در حال جست‌وجو و دانلود...")
-    song, file = await process_request(query, user_id)
+    status = await message.reply("🔎 در حال پیدا کردن آهنگ...")
+
+    song = await search_song(query)
+
+    await status.edit("⏳ در حال دانلود...")
+
+    file = await download_music(song, user_id)
 
     if file:
-        logger.info(f"Uploading audio file {file} to Telegram for user {user_id}")
         await message.reply_audio(
             audio=file,
             performer="IR_BOTZ™",
             title=song,
-            caption=f"🎵 {song}\n\n✅ {BOT_ID}"
+            caption=f"""
+🎵 {song}
+
+✅ {BOT_ID}
+"""
         )
+
         try:
             os.remove(file)
-            logger.info(f"Cleaned up temporary file: {file}")
-        except Exception as e:
-            logger.warning(f"Could not remove temp file: {e}")
+        except Exception:
+            pass
 
         await status.delete()
+
     else:
-        logger.warning(f"Could not find or download music for query: {query}")
         await status.edit(
             "❌ متاسفانه خطایی در دانلود پیش آمد. لطفاً دوباره تلاش کنید."
         )
 
 
+
+
 # ================= اجرای پروژه =================
 
 async def main():
-    logger.info("Starting bot initialization...")
-    
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or API_ID == 0:
-        logger.error("❌ Critical: Credentials are not configured!")
-        return
-
-    # 🟢 حذف وب‌هوک از طریق ریکوئست مستقیم و امن به تلگرام (بدون کرش کردن)
-    try:
-        logger.info("🔧 Deleting any old webhooks via HTTP Request...")
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
-        res = requests.get(url, params={"drop_pending_updates": "true"}, timeout=5)
-        logger.info(f"Webhook deletion status: {res.status_code} - {res.text}")
-    except Exception as webhook_error:
-        logger.warning(f"Could not clear webhook via HTTP: {webhook_error}")
-
-    try:
-        logger.info("Attempting to connect to Telegram...")
-        await app.start()
-        logger.info("✅ Music Bot is running successfully with long polling active!")
-        
-        # بیدار نگه داشتن دائم برنامه
-        while True:
-            await asyncio.sleep(3600)
-            
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        logger.info("Termination signal received. Shutting down...")
-    except Exception as e:
-        logger.exception("❌ A critical error occurred while running the bot:")
-    finally:
-        logger.info("Stopping Pyrogram client...")
-        try:
-            await app.stop(block=False)
-            logger.info("Pyrogram client stopped successfully.")
-        except Exception as stop_error:
-            logger.debug(f"Ignored loop cleanup error on exit: {stop_error}")
+    await app.start()
+    print("✅ Music Bot is running successfully!")
+    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
