@@ -7,7 +7,7 @@ import requests
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.enums import ParseMode
 
 
@@ -35,13 +35,26 @@ def _run_health_server():
 threading.Thread(target=_run_health_server, daemon=True).start()
 
 
-# ================= تنظیمات =================
+# =========================================================================
+# تنظیمات ربات
+# تو می‌توانی مقادیر را مستقیماً داخل کوتیشن‌های دوم بنویسی (به عنوان زاپاس)
+# یا آن‌ها را در بخش Environment Variables پنل رندر ست کنی.
+# =========================================================================
 
-BOT_TOKEN = ""
-BOT_ID = "@YOUR_BOT_ID"
+# توکن ربات تلگرام شما
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
-API_ID = 
-API_HASH = ""
+# آیدی ربات شما (حتماً با @ شروع شود)
+BOT_ID = os.environ.get("BOT_ID", "@YOUR_BOT_ID")
+
+# کد عددی API_ID (اگر دستی می‌نویسی، کوتیشن‌ها را پاک کن و عدد بگذار، مثل: 123456)
+try:
+    API_ID = int(os.environ.get("API_ID", "YOUR_API_ID_HERE"))
+except ValueError:
+    API_ID = 0
+
+# کد هش API_HASH شما
+API_HASH = os.environ.get("API_HASH", "YOUR_API_HASH_HERE")
 
 
 app = Client(
@@ -167,7 +180,7 @@ async def download_music(query, user_id):
 # ================= اجرای هم‌زمان جست‌وجو + دانلود =================
 
 async def process_request(query, user_id):
-    # این دو کار به هم وابسته نیستن، پس هم‌زمان اجرا میشن تا زمان کلی کم بشه
+    # اجرای موازی تسک‌ها برای به حداقل رساندن زمان پاسخ‌دهی
     song_task = asyncio.create_task(search_song(query))
     file_task = asyncio.create_task(download_music(query, user_id))
 
@@ -261,12 +274,16 @@ async def music(client, message):
 # ================= اجرای پروژه =================
 
 async def main():
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or API_ID == 0:
+        print("❌ خطا: لطفاً توکن، API_ID و API_HASH خود را در کدهای بالا یا در بخش Environment Variables رندر تنظیم کنید!")
+        return
 
     await app.start()
-
     print("✅ Music Bot is running successfully!")
-
-    await asyncio.Event().wait()
+    
+    # متد idle کمک می‌کند سشن به صورت کاملاً امن با خاموش شدن سرور بسته شود
+    await idle()
+    await app.stop()
 
 
 if __name__ == "__main__":
