@@ -37,11 +37,11 @@ threading.Thread(target=_run_health_server, daemon=True).start()
 
 # ================= تنظیمات =================
 
-BOT_TOKEN = "5098580833:AAEzriKZYpbJOljEwP-8KrOsYlGY-hRyDXA"
+BOT_TOKEN = ""
 BOT_ID = "@YOUR_BOT_ID"
 
-API_ID = 3335796
-API_HASH = "138b992a0e672e8346d8439c3f42ea78"
+API_ID = 
+API_HASH = ""
 
 
 app = Client(
