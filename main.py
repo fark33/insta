@@ -8,7 +8,7 @@ import requests
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from pyrogram import Client, filters, idle
+from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 
 # ================= تنظیمات و پیکربندی لاگ‌ها =================
@@ -264,13 +264,23 @@ async def main():
         logger.info("Attempting to connect to Telegram...")
         await app.start()
         logger.info("✅ Music Bot is running successfully!")
-        await idle()
+        
+        # بیدار نگه داشتن ربات به صورت دائمی و امن بدون تداخل با سیگنال‌های رندر
+        while True:
+            await asyncio.sleep(3600)
+            
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        logger.info("Termination signal received. Shutting down...")
     except Exception as e:
-        logger.exception("❌ A critical error occurred while starting the bot:")
+        logger.exception("❌ A critical error occurred while running the bot:")
     finally:
         logger.info("Stopping Pyrogram client...")
-        await app.stop()
-        logger.info("Pyrogram client stopped.")
+        try:
+            # جلوگیری از مسدود شدن تسک‌ها در زمان خروج با فلگ block=False
+            await app.stop(block=False)
+            logger.info("Pyrogram client stopped successfully.")
+        except Exception as stop_error:
+            logger.debug(f"Ignored minor loop cleanup error on exit: {stop_error}")
 
 
 if __name__ == "__main__":
