@@ -1,6 +1,4 @@
 pyrogram==2.0.106
-tgcrypto
-python-dotenv
-fastapi
-uvicorn
-yt-dlp
+tgcrypto==1.2.5
+yt-dlp>=2024.8.6
+requests>=2.31.0
