@@ -66,30 +66,37 @@ async def download_music(query, user_id):
                 # تا نیاز به PO Token (که باعث خطای format not available می‌شد) نداشته باشیم
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'ios', 'web'],
+                        'player_client': ['android', 'ios', 'tv', 'web'],
                         'player_skip': ['webpage'],
                     }
                 },
+                'ignoreerrors': False,
                 'http_headers': {
                     'User-Agent': 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip'
                 },
             }
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # چند نتیجه جستجو می‌کنیم تا اگه اولی قابل دانلود نبود، بریم سراغ بعدی
-                info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            search_opts = dict(ydl_opts)
+            search_opts['extract_flat'] = 'in_playlist'  # فقط لیست بگیر، فرمت چک نشه
+
+            with yt_dlp.YoutubeDL(search_opts) as ydl_search:
+                info = ydl_search.extract_info(f"ytsearch5:{query}", download=False)
                 entries = info.get('entries', []) if info else []
 
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 for entry in entries:
                     if entry is None:
                         continue
+                    video_id = entry.get('id')
+                    video_url = entry.get('url') or (f"https://www.youtube.com/watch?v={video_id}" if video_id else None)
+                    if not video_url:
+                        continue
                     try:
-                        video_url = entry.get('webpage_url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
                         ydl.download([video_url])
                         if os.path.exists(output_filename):
                             return output_filename
                     except Exception as inner_e:
-                        print(f"⚠️ رد شد از ویدیو {entry.get('id')}: {inner_e}")
+                        print(f"⚠️ رد شد از ویدیو {video_id}: {inner_e}")
                         continue
 
         except Exception as e:
