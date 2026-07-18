@@ -1,32 +1,20 @@
-# ---- تصویر پایه ----
+# استفاده از نسخه سبک پایتون ۳.۱۱
 FROM python:3.11-slim
 
-# جلوگیری از پرامپت‌های تعاملی apt
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
-
-# ffmpeg برای پردازش صوتی یوتیوب لازمه
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
-
+# تنظیم دایرکتوری کاری
 WORKDIR /app
 
-# نصب پکیج‌های پایتون (جدا از کپی کدها، برای کش بهتر لایه‌ها)
+# نصب ابزارهای مورد نیاز سیستم (FFmpeg برای پردازش صدا ضروری است)
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# کپی کردن فایل نیازمندی‌ها و نصب آن‌ها
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# کپی سورس
-COPY main.py .
+# کپی کردن تمام فایل‌های پروژه (شامل main.py و cookies.txt) به داخل کانتینر
+COPY . .
 
-# مسیر داده‌ی پایدار برای session و فایل‌های دانلودی موقت
-RUN mkdir -p /app/data
-ENV WORKDIR=/app/data
-
-# اجرا با کاربر غیر روت (best practice امنیتی)
-RUN useradd --create-home --shell /bin/bash botuser && \
-    chown -R botuser:botuser /app
-USER botuser
-
-CMD ["python", "main.py"]
+# اجرای ربات
+CMD ["python3", "main.py"]
