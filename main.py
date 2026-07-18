@@ -1,110 +1,80 @@
 import os
 import asyncio
 import yt_dlp
-import requests
 from pyrogram import Client, filters
+import traceback
 
-# ================= تنظیمات اصلی =================
+# ================= تنظیمات =================
 API_ID = 3335796
 API_HASH = "138b992a0e672e8346d8439c3f42ea78"
 BOT_TOKEN = "5098580833:AAEzriKZYpbJOljEwP-8KrOsYlGY-hRyDXA"
-BOT_ID = "@YOUR_BOT_ID"
 
-app = Client(
-    "MyBot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+app = Client("MyBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ================= توابع جانبی =================
-async def search_song(query):
-    def _search():
-        try:
-            data = requests.get(
-                "https://itunes.apple.com/search",
-                params={"term": query, "media": "music", "limit": 1},
-                timeout=5
-            ).json()
-            if data.get("resultCount"):
-                item = data["results"][0]
-                return f"{item.get('trackName')} - {item.get('artistName')}"
-        except Exception:
-            pass
-        return query
-    return await asyncio.to_thread(_search)
-
-async def download_music(query, user_id):
-    output_filename = f"music_{user_id}.m4a"
+# ================= تابع دانلود هوشمند =================
+async def download_media(url, user_id):
+    # مسیر ذخیره فایل برای هر کاربر مجزا
+    output_path = f"downloads/media_{user_id}"
     
-    def _download():
-        if os.path.exists(output_filename):
-            os.remove(output_filename)
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': f'{output_path}.%(ext)s',
+        'cookiefile': 'cookies.txt',
+        'noplaylist': True,
+        'quiet': False, # برای دیدن جزئیات در لاگ
+        'ignoreerrors': False,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'm4a',
+            'preferredquality': '192',
+        }],
+        # تنظیمات برای پشتیبانی از تمام سایت‌ها (مثل اینستا، یوتیوب، توییتر و غیره)
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        },
+    }
 
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': f'music_{user_id}.%(ext)s',
-            'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': 'cookies.txt',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-                'preferredquality': '192',
-            }],
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            },
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36'
-            },
-        }
+    try:
+        # پاک کردن فایل قدیمی قبل از دانلود جدید
+        for ext in ['m4a', 'mp3', 'webm']:
+            if os.path.exists(f"{output_path}.{ext}"):
+                os.remove(f"{output_path}.{ext}")
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([f"ytsearch1:{query}"])
-            return output_filename if os.path.exists(output_filename) else None
-        except Exception as e:
-            print(f"❌ Error in download_music: {e}")
-            return None
+        # اجرای دانلود
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            # تبدیل به m4a اگر فرمت دیگری بود
+            base, ext = os.path.splitext(filename)
+            final_file = f"{base}.m4a"
+            return final_file if os.path.exists(final_file) else None
 
-    return await asyncio.to_thread(_download)
+    except Exception:
+        print(f"❌ خطای کامل: {traceback.format_exc()}")
+        return None
 
 # ================= هندلرها =================
 @app.on_message(filters.command("start"))
 async def start(_, message):
-    await message.reply_text("👋 سلام!\nبه ربات دانلود موزیک خوش آمدید.\nنام آهنگ یا لینک را بفرستید.")
+    await message.reply_text("👋 سلام!\nلینک هر آهنگی (یوتیوب، اینستاگرام و...) را بفرستید تا دانلود کنم.")
 
-@app.on_message(filters.private & filters.text)
-async def music_handler(client, message):
-    if message.text.startswith("/"):
-        return
+@app.on_message(filters.text & ~filters.command("start"))
+async def handle_message(client, message):
+    url = message.text.strip()
+    status = await message.reply("⏳ در حال دریافت اطلاعات...")
 
-    status = await message.reply("🔎 در حال جستجو و دانلود...")
-
-    query = message.text.strip()
-    song_title = await search_song(query)
-    file_path = await download_music(song_title, message.from_user.id)
+    file_path = await download_media(url, message.from_user.id)
 
     if file_path:
-        try:
-            await message.reply_audio(
-                audio=file_path,
-                performer="IR_BOTZ™",
-                title=song_title,
-                caption=f"🎵 {song_title}\n\n✅ {BOT_ID}"
-            )
-        except Exception as e:
-            print(f"⚠️ خطای ارسال به تلگرام: {e}")
-        finally:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            await status.delete()
+        await message.reply_audio(audio=file_path, caption="✅ فایل آماده شد")
+        os.remove(file_path) # پاکسازی بعد از ارسال
     else:
-        await status.edit("❌ خطا در دریافت فایل. لطفاً دوباره تلاش کنید.")
+        await message.reply("❌ دانلود ناموفق بود. لاگ‌های Render را چک کنید.")
+    
+    await status.delete()
 
-# ================= اجرای ربات =================
+# ایجاد پوشه دانلود در صورت نبودن
+if not os.path.exists('downloads'):
+    os.makedirs('downloads')
+
 app.run()
