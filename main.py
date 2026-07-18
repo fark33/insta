@@ -117,19 +117,30 @@ async def music(client, message):
     file = await download_music(song, message.from_user.id)
 
     if file:
-        await message.reply_audio(
-            audio=file,
-            performer="IR_BOTZ™",
-            title=song,
-            caption=f"🎵 {song}\n\n✅ {BOT_ID}"
-        )
         try:
-            os.remove(file)
-        except Exception:
-            pass
-        await status.delete()
+            await message.reply_audio(
+                audio=file,
+                performer="IR_BOTZ™",
+                title=song,
+                caption=f"🎵 {song}\n\n✅ {BOT_ID}"
+            )
+        except Exception as e:
+            print(f"⚠️ خطا در ارسال فایل صوتی: {e}")
+        finally:
+            try:
+                os.remove(file)
+            except Exception:
+                pass
+            try:
+                await status.delete()
+            except Exception:
+                pass
     else:
-        await status.edit("❌ خطا در دریافت فایل. لطفاً دوباره تلاش کنید.")
+        try:
+            await status.edit("❌ خطا در دریافت فایل. لطفاً دوباره تلاش کنید.")
+        except Exception as e:
+            # مثلاً وقتی همین متن قبلاً روی پیام بوده (MESSAGE_NOT_MODIFIED)
+            print(f"⚠️ خطا در ادیت پیام وضعیت: {e}")
 
 
 # ================= اجرای ربات (بدون نیاز به پورت) =================
