@@ -1,180 +1,194 @@
 import os
-import re
-import glob
-import traceback
-import threading
+import time
+import asyncio
+import logging
+
+import requests
 import yt_dlp
-from pyrogram import Client, filters
-from pyrogram.types import InputMediaPhoto, InputMediaVideo
-from fastapi import FastAPI
-import uvicorn
 
-# ---------------------------------------------------------------------------
-# تنظیمات محیطی
-# ---------------------------------------------------------------------------
-API_ID = int(os.environ["API_ID"])
-API_HASH = os.environ["API_HASH"]
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-BOT_USERNAME = os.environ["BOT_USERNAME"]
+from pyrogram import Client, filters, idle
+from pyrogram.enums import ParseMode
 
-DOWNLOAD_DIR = "downloads"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+# ================= لاگ =================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+log = logging.getLogger("MusicBot")
 
-INSTAGRAM_URL_RE = re.compile(r"(instagram\.com|instagr\.am)/", re.IGNORECASE)
-VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".webm")
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+# ================= تنظیمات =================
+# طبق درخواست، مقادیر مستقیم اینجا هاردکد شدن (به‌جای .env).
+# توجه: چون این مقادیر داخل کد هستن، اگه این فایل رو در جایی عمومی (گیت‌هاب و ...) آپلود کنی
+# لو میرن. برای یک ربات شخصی/خصوصی روی سرور خودت مشکلی نداره.
+
+BOT_TOKEN = "5098580833:AAEzriKZYpbJOljEwP-8KrOsYlGY-hRyDXA"
+API_ID = 3335796
+API_HASH = "138b992a0e672e8346d8439c3f42ea78"
+BOT_ID = "@YOUR_BOT_ID"
+
+COOLDOWN_SECONDS = 3
+
+# مسیر ذخیره‌سازی session (برای persistent volume در Docker)
+WORKDIR = "/app/data"
+os.makedirs(WORKDIR, exist_ok=True)
+
+app = Client(
+    "MusicBot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    workers=8,
+    workdir=WORKDIR,
 )
 
-# ---------------------------------------------------------------------------
-# وب‌سرور سلامت (برای هاست‌هایی مثل Railway/Render)
-# ---------------------------------------------------------------------------
-app_web = FastAPI()
+# ================= آنتی‌اسپم (Cooldown) =================
+user_cooldowns: dict[int, float] = {}
 
 
-@app_web.get("/")
-def home():
-    return {"status": "Bot is running"}
+def on_cooldown(user_id: int) -> bool:
+    now = time.time()
+    if now - user_cooldowns.get(user_id, 0) < COOLDOWN_SECONDS:
+        return True
+    user_cooldowns[user_id] = now
+    return False
 
 
-def run_web():
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app_web, host="0.0.0.0", port=port)
+# ================= جستجوی آهنگ (iTunes API) =================
+async def search_song(query: str) -> str:
+    def _search():
+        try:
+            data = requests.get(
+                "https://itunes.apple.com/search",
+                params={"term": query, "media": "music", "limit": 1},
+                timeout=5,
+            ).json()
+
+            if data.get("resultCount"):
+                item = data["results"][0]
+                return f"{item.get('trackName', '')} - {item.get('artistName', '')}"
+        except Exception as e:
+            log.warning("search_song failed: %s", e)
+        return query
+
+    return await asyncio.to_thread(_search)
 
 
-bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# ================= دانلود موزیک =================
+async def download_music(query: str, user_id: int) -> str | None:
+    output_filename = os.path.join(WORKDIR, f"music_{user_id}.m4a")
+
+    def _download():
+        t0 = time.time()
+        try:
+            if os.path.exists(output_filename):
+                os.remove(output_filename)
+
+            ydl_opts = {
+                "format": "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best",
+                "outtmpl": os.path.join(WORKDIR, f"music_{user_id}.%(ext)s"),
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "m4a",
+                    "preferredquality": "0",
+                }],
+                "extractor_args": {
+                    "youtube": {"player_client": ["android"]},
+                },
+                "concurrent_fragment_downloads": 4,
+                "http_chunk_size": 10485760,
+                "retries": 3,
+                "socket_timeout": 10,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.extract_info(f"ytsearch1:{query}", download=True)
+
+            if os.path.exists(output_filename):
+                log.info("دانلود در %.2f ثانیه انجام شد", time.time() - t0)
+                return output_filename
+
+        except Exception as e:
+            log.error("خطا در دانلود: %s", e)
+
+        return None
+
+    return await asyncio.to_thread(_download)
 
 
-# ---------------------------------------------------------------------------
-# دانلود (تک‌مدیا یا آلبوم)
-# ---------------------------------------------------------------------------
-def download_media(url):
-    """
-    برمی‌گرداند: (files: list[str], error: str | None)
-    files لیستی از مسیر فایل‌های واقعیِ دانلودشده روی دیسک است
-    (برای پست تکی یک آیتم، برای آلبوم چند آیتم).
-    """
-    ydl_opts = {
-        "format": "best",
-        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s_%(autonumber)s.%(ext)s"),
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": False,   # اجازه بده آلبوم‌ها (carousel) هم پردازش شوند
-        "http_headers": {"User-Agent": USER_AGENT},
-    }
-    if os.path.exists("cookies.txt"):
-        ydl_opts["cookiefile"] = "cookies.txt"
+# ================= START =================
+@app.on_message(filters.command("start") & filters.private)
+async def start(client, message):
+    if on_cooldown(message.from_user.id):
+        return
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except yt_dlp.utils.DownloadError as e:
-        err = str(e).lower()
-        if "login" in err or "private" in err:
-            return [], "🔒 این اکانت خصوصی است یا برای دیدن این پست نیاز به کوکی لاگین دارید."
-        if "rate-limit" in err or "429" in err:
-            return [], "⏳ اینستاگرام موقتاً محدودمان کرده. چند دقیقه دیگر دوباره امتحان کنید."
-        if "unsupported url" in err:
-            return [], "❌ این لینک پشتیبانی نمی‌شود."
-        print("DownloadError:", e)
-        return [], f"⚠️ خطای دانلود از اینستاگرام (احتمالاً نیاز به بروزرسانی yt-dlp یا کوکی جدید دارید)."
-    except Exception:
-        traceback.print_exc()
-        return [], "⚠️ خطای غیرمنتظره در دانلود رخ داد."
+    name = message.from_user.first_name
 
-    if not info:
-        return [], "❌ محتوایی یافت نشد."
+    text = f"""
+<b>👋 سلام {name} عزیز خوش آمدید❤️
 
-    entries = info["entries"] if info.get("_type") == "playlist" else [info]
+🔮 من ربات کاربردی دانلود آهنگ هستم.
 
-    files = []
-    for entry in entries:
-        if not entry:
-            continue
-        fp = None
-        # روش قابل‌اعتماد: مسیر واقعی را از خروجی yt-dlp بگیر
-        rd = entry.get("requested_downloads")
-        if rd:
-            fp = rd[0].get("filepath") or rd[0].get("_filename")
-        # روش پشتیبان: prepare_filename
-        if not fp or not os.path.exists(fp):
-            try:
-                fp = ydl.prepare_filename(entry)
-            except Exception:
-                fp = None
-        if fp and os.path.exists(fp):
-            files.append(fp)
+هم اکنون نام آهنگ موردنظرتو برام بفرست.
+تا برات فایلشو بفرستم💗😍
 
-    if not files:
-        return [], "❌ فایلی برای دانلود پیدا نشد (شاید پست حذف شده یا خصوصی است)."
+🖍️ سازنده ربات :
+<a href="https://telegram.me/farshidband">FﾑRSみɨo-BﾑŊo</a></b>
+"""
 
-    return files, None
+    await message.reply(
+        text,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
 
 
-# ---------------------------------------------------------------------------
-# هندلرها
-# ---------------------------------------------------------------------------
-@bot.on_message(filters.command("start"))
-def start(client, message):
-    message.reply_text("✅ ربات آماده است. لینک اینستاگرام یا آیدی (مثلاً @username) را بفرستید.")
+# ================= دریافت آهنگ =================
+@app.on_message(filters.private & filters.text)
+async def music(client, message):
+    query = message.text.strip()
+    user_id = message.from_user.id
 
+    if query.startswith("/"):
+        return
 
-@bot.on_message(filters.text & ~filters.command("start"))
-def downloader(client, message):
-    text = message.text.strip()
+    if on_cooldown(user_id):
+        return
 
-    if text.startswith("@"):
-        url = f"https://www.instagram.com/{text.replace('@', '')}/"
-    elif INSTAGRAM_URL_RE.search(text):
-        url = text
+    status = await message.reply("🔎 در حال پیدا کردن آهنگ...")
+    song = await search_song(query)
+
+    await status.edit("⏳ در حال دانلود...")
+    file = await download_music(song, user_id)
+
+    if file:
+        await message.reply_audio(
+            audio=file,
+            performer="IR_BOTZ™",
+            title=song,
+            caption=f"🎵 {song}\n\n✅ {BOT_ID}",
+        )
+
+        try:
+            os.remove(file)
+        except Exception:
+            pass
+
+        await status.delete()
     else:
-        message.reply_text("❌ لطفاً لینک یا آیدی معتبر اینستاگرام بفرستید.")
-        return
+        await status.edit("❌ متاسفانه خطایی در دانلود پیش آمد. لطفاً دوباره تلاش کنید.")
 
-    msg = message.reply_text("⏳ در حال پردازش و دانلود...")
 
-    files, error = download_media(url)
-
-    if error:
-        msg.edit_text(error)
-        return
-
-    caption = f"📥 دانلود شده توسط ربات\n\n✅ {BOT_USERNAME}"
-
-    try:
-        if len(files) == 1:
-            fp = files[0]
-            if fp.lower().endswith(VIDEO_EXTS):
-                client.send_video(message.chat.id, video=fp, caption=caption)
-            else:
-                client.send_photo(message.chat.id, photo=fp, caption=caption)
-        else:
-            # تلگرام حداقل ۲ آیتم برای media group لازم دارد؛ اینجا چون
-            # len(files) > 1 است این شرط همیشه برقرار است.
-            media_group = []
-            for i, fp in enumerate(files[:10]):  # سقف تلگرام: ۱۰ آیتم در هر گروه
-                cap = caption if i == 0 else None
-                if fp.lower().endswith(VIDEO_EXTS):
-                    media_group.append(InputMediaVideo(fp, caption=cap))
-                else:
-                    media_group.append(InputMediaPhoto(fp, caption=cap))
-            client.send_media_group(message.chat.id, media=media_group)
-
-        msg.delete()
-    except Exception as e:
-        traceback.print_exc()
-        msg.edit_text(f"⚠️ خطایی در ارسال فایل رخ داد: {str(e)}")
-    finally:
-        for fp in files:
-            try:
-                os.remove(fp)
-            except OSError:
-                pass
+# ================= اجرای پروژه =================
+async def main():
+    await app.start()
+    log.info("✅ Music Bot is running successfully!")
+    await idle()
+    await app.stop()
 
 
 if __name__ == "__main__":
-    threading.Thread(target=run_web, daemon=True).start()
-    print("Bot Started...")
-    bot.run()
+    asyncio.run(main())
