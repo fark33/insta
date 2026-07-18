@@ -1,4 +1,4 @@
 pyrogram
 tgcrypto
 requests
-yt-dlp>=2025.6.30
+yt-dlp
