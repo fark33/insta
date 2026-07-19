@@ -26,49 +26,39 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 app = Client("MyBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ================= وب‌سرور برای Render (رفع مشکل پورت) =================
+# ================= وب‌سرور برای Render =================
 def start_http_server():
-    """یک وب‌سرور ساده برای پاسخ به Health Check رندر"""
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", port), handler) as httpd:
         logger.info(f"🌐 وب‌سرور روی پورت {port} برای سلامت رندر فعال شد")
         httpd.serve_forever()
 
-# اگر در محیط Render هستیم یا به‌طور کلی، وب‌سرور را در یک ترد جداگانه اجرا کن
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود (همگام) =================
+# ================= تابع دانلود با روش دو مرحله‌ای =================
 def download_audio(query: str):
     """
     جستجو و دانلود اولین نتیجه از یوتیوب به صورت MP3 با کیفیت 192
     خروجی: (مسیر_فایل, دیکشنری_متادیتا) یا (None, پیام_خطا)
     """
-    ydl_opts = {
-        'format': 'bestaudio/best',  # بهترین فرمت صوتی موجود
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
-        'cookiefile': 'cookies.txt',  # استفاده از کوکی
+    # تنظیمات اولیه برای دریافت اطلاعات (بدون دانلود)
+    info_opts = {
         'quiet': True,
         'no_warnings': True,
+        'cookiefile': 'cookies.txt',
         'default_search': 'ytsearch',
         'noplaylist': True,
-        # ====== تنظیمات جدید برای رفع خطای فرمت ======
-        'ignoreerrors': True,          # از خطاهای فرمت رد شو
-        'extractaudio': True,          # استخراج صوتی
-        'audioformat': 'mp3',          # خروجی نهایی mp3
-        'youtube_include_dash_manifest': False,  # جلوگیری از مشکل DASH
+        'extract_flat': False,  # اطلاعات کامل را بگیر
+        'ignoreerrors': True,
     }
 
     try:
         logger.info(f"🔍 شروع جستجو برای: {query}")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{query}", download=True)
-
+        with yt_dlp.YoutubeDL(info_opts) as ydl:
+            # دریافت اطلاعات ویدیو (بدون دانلود)
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+            
             if not info or 'entries' not in info or len(info['entries']) == 0:
                 logger.warning(f"⚠️ نتیجه‌ای برای '{query}' پیدا نشد.")
                 return None, "هیچ آهنگی با این نام پیدا نشد."
@@ -77,38 +67,59 @@ def download_audio(query: str):
             if entry is None:
                 return None, "خطا در دریافت اطلاعات آهنگ."
 
-            # گرفتن مسیر فایل دانلود شده
-            file_path = None
-            if 'requested_downloads' in entry and entry['requested_downloads']:
-                file_path = entry['requested_downloads'][0].get('filepath')
+            # استخراج URL ویدیو
+            video_url = entry.get('webpage_url')
+            if not video_url:
+                return None, "آدرس ویدیو پیدا نشد."
 
-            # اگر مسیر را نگرفت، جدیدترین فایل mp3 پوشه را پیدا کن
-            if not file_path or not os.path.exists(file_path):
-                mp3_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.mp3')]
-                if mp3_files:
-                    mp3_files.sort(
-                        key=lambda x: os.path.getmtime(os.path.join(DOWNLOAD_DIR, x)),
-                        reverse=True
-                    )
-                    file_path = os.path.join(DOWNLOAD_DIR, mp3_files[0])
-                else:
-                    return None, "فایل دانلود شده در سرور پیدا نشد."
-
-            if not os.path.exists(file_path):
-                logger.error(f"❌ فایل در مسیر {file_path} وجود ندارد.")
-                return None, "فایل دانلود شده یافت نشد."
-
-            # استخراج متادیتا برای ارسال به تلگرام
+            # استخراج متادیتا
             artist = entry.get('artist') or entry.get('uploader') or 'Unknown Artist'
             title = entry.get('title', 'Unknown Title')
             duration = entry.get('duration', 0)
 
-            logger.info(f"✅ دانلود موفق: {title} - {artist}")
-            return file_path, {
-                "title": title,
-                "artist": artist,
-                "duration": int(duration)
+            # ========== مرحله دوم: انتخاب بهترین فرمت صوتی ==========
+            # تنظیمات دانلود با انتخاب بهترین فرمت صوتی موجود
+            download_opts = {
+                'format': 'bestaudio/best',  # بهترین فرمت صوتی
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
+                'cookiefile': 'cookies.txt',
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+                'ignoreerrors': True,
+                'extractaudio': True,
+                'audioformat': 'mp3',
             }
+
+            with yt_dlp.YoutubeDL(download_opts) as ydl_download:
+                logger.info(f"⬇️ شروع دانلود: {title}")
+                # دانلود با استفاده از URL ویدیو (نه جستجو)
+                ydl_download.download([video_url])
+
+            # پیدا کردن فایل دانلود شده
+            mp3_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.mp3')]
+            if mp3_files:
+                mp3_files.sort(
+                    key=lambda x: os.path.getmtime(os.path.join(DOWNLOAD_DIR, x)),
+                    reverse=True
+                )
+                file_path = os.path.join(DOWNLOAD_DIR, mp3_files[0])
+                if os.path.exists(file_path):
+                    logger.info(f"✅ دانلود موفق: {title} - {artist}")
+                    return file_path, {
+                        "title": title,
+                        "artist": artist,
+                        "duration": int(duration)
+                    }
+                else:
+                    return None, "فایل دانلود شده یافت نشد."
+            else:
+                return None, "فایل MP3 در پوشه پیدا نشد."
 
     except Exception as e:
         logger.error(f"❌ خطا در دانلود: {str(e)}")
@@ -119,28 +130,25 @@ def download_audio(query: str):
 @app.on_message(filters.command("start"))
 async def start(_, message):
     await message.reply_text(
-        "👋2 سلام!\n"
+        "👋 3سلام!\n"
         "نام آهنگ مورد نظرت را بنویس تا دانلود کنم.\n"
         "مثال: `Shape of You`"
     )
 
-# ================= دریافت متن کاربر (جستجوی آهنگ) =================
+# ================= دریافت متن کاربر =================
 @app.on_message(filters.text & ~filters.command("start"))
 async def handle_music(_, message):
     query = message.text.strip()
     if not query:
         return
 
-    # پیام وضعیت (درحال جستجو)
     status_msg = await message.reply_text(f"🔍 در حال جستجو برای: **{query}** ...")
 
     try:
         logger.info(f"📩 درخواست جدید از کاربر {message.from_user.id}: {query}")
 
-        # اجرای تابع دانلود در یک thread جداگانه (تا ربات قفل نشود)
         result, meta = await asyncio.to_thread(download_audio, query)
 
-        # بررسی خطا
         if result is None:
             await status_msg.edit_text(f"❌ {meta}")
             logger.warning(f"⛔ خطا برای کاربر {message.from_user.id}: {meta}")
@@ -151,10 +159,8 @@ async def handle_music(_, message):
         artist = meta.get('artist', 'Unknown')
         duration = meta.get('duration', 0)
 
-        # بروزرسانی وضعیت
         await status_msg.edit_text(f"📤 در حال ارسال **{title}** ...")
 
-        # ارسال فایل صوتی به کاربر
         try:
             await message.reply_audio(
                 audio=file_path,
@@ -163,7 +169,7 @@ async def handle_music(_, message):
                 duration=duration,
                 caption=f"🎵 **{title}**\n👤 {artist}"
             )
-            await status_msg.delete()  # پاک کردن پیام وضعیت
+            await status_msg.delete()
             logger.info(f"✅ فایل '{title}' برای کاربر {message.from_user.id} ارسال شد.")
 
         except RPCError as e:
@@ -176,7 +182,6 @@ async def handle_music(_, message):
         await status_msg.edit_text("❌ یک خطای غیرمنتظره رخ داد. لطفاً دوباره تلاش کنید.")
 
     finally:
-        # پاکسازی فایل دانلود شده (حتی اگر خطا رخ داده باشد)
         try:
             if 'file_path' in locals() and os.path.exists(file_path):
                 os.remove(file_path)
