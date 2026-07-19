@@ -36,90 +36,85 @@ def start_http_server():
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود با روش دو مرحله‌ای =================
+# ================= تابع دانلود با رویکرد جدید =================
 def download_audio(query: str):
     """
     جستجو و دانلود اولین نتیجه از یوتیوب به صورت MP3 با کیفیت 192
     خروجی: (مسیر_فایل, دیکشنری_متادیتا) یا (None, پیام_خطا)
     """
-    # تنظیمات اولیه برای دریافت اطلاعات (بدون دانلود)
-    info_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'cookiefile': 'cookies.txt',
-        'default_search': 'ytsearch',
-        'noplaylist': True,
-        'extract_flat': False,  # اطلاعات کامل را بگیر
-        'ignoreerrors': True,
-    }
-
     try:
         logger.info(f"🔍 شروع جستجو برای: {query}")
-        with yt_dlp.YoutubeDL(info_opts) as ydl:
-            # دریافت اطلاعات ویدیو (بدون دانلود)
+
+        # ===== مرحله ۱: فقط URL را بگیر (بدون درخواست فرمت) =====
+        search_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'default_search': 'ytsearch',
+            'noplaylist': True,
+            'extract_flat': True,          # فقط اطلاعات سطحی
+            'ignoreerrors': True,
+            'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+        }
+
+        with yt_dlp.YoutubeDL(search_opts) as ydl:
             info = ydl.extract_info(f"ytsearch1:{query}", download=False)
-            
             if not info or 'entries' not in info or len(info['entries']) == 0:
-                logger.warning(f"⚠️ نتیجه‌ای برای '{query}' پیدا نشد.")
                 return None, "هیچ آهنگی با این نام پیدا نشد."
 
             entry = info['entries'][0]
             if entry is None:
                 return None, "خطا در دریافت اطلاعات آهنگ."
 
-            # استخراج URL ویدیو
-            video_url = entry.get('webpage_url')
+            # استخراج URL و متادیتا
+            video_url = entry.get('url') or entry.get('webpage_url')
             if not video_url:
                 return None, "آدرس ویدیو پیدا نشد."
 
-            # استخراج متادیتا
-            artist = entry.get('artist') or entry.get('uploader') or 'Unknown Artist'
             title = entry.get('title', 'Unknown Title')
+            artist = entry.get('channel', entry.get('uploader', 'Unknown Artist'))
             duration = entry.get('duration', 0)
 
-            # ========== مرحله دوم: انتخاب بهترین فرمت صوتی ==========
-            # تنظیمات دانلود با انتخاب بهترین فرمت صوتی موجود
-            download_opts = {
-                'format': 'bestaudio/best',  # بهترین فرمت صوتی
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
-                'cookiefile': 'cookies.txt',
-                'quiet': True,
-                'no_warnings': True,
-                'noplaylist': True,
-                'ignoreerrors': True,
-                'extractaudio': True,
-                'audioformat': 'mp3',
-            }
+            logger.info(f"✅ پیدا شد: {title} - {artist}")
 
-            with yt_dlp.YoutubeDL(download_opts) as ydl_download:
-                logger.info(f"⬇️ شروع دانلود: {title}")
-                # دانلود با استفاده از URL ویدیو (نه جستجو)
-                ydl_download.download([video_url])
+        # ===== مرحله ۲: دانلود با بهترین فرمت صوتی موجود =====
+        download_opts = {
+            'format': 'bestaudio',         # بهترین فرمت صوتی (هر کدکی)
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'ignoreerrors': True,
+            'extractaudio': True,          # استخراج صوتی
+            'audioformat': 'mp3',          # تبدیل نهایی به mp3
+            'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+        }
 
-            # پیدا کردن فایل دانلود شده
-            mp3_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.mp3')]
-            if mp3_files:
-                mp3_files.sort(
-                    key=lambda x: os.path.getmtime(os.path.join(DOWNLOAD_DIR, x)),
-                    reverse=True
-                )
-                file_path = os.path.join(DOWNLOAD_DIR, mp3_files[0])
-                if os.path.exists(file_path):
-                    logger.info(f"✅ دانلود موفق: {title} - {artist}")
-                    return file_path, {
-                        "title": title,
-                        "artist": artist,
-                        "duration": int(duration)
-                    }
-                else:
-                    return None, "فایل دانلود شده یافت نشد."
-            else:
-                return None, "فایل MP3 در پوشه پیدا نشد."
+        with yt_dlp.YoutubeDL(download_opts) as ydl_download:
+            logger.info(f"⬇️ شروع دانلود: {title}")
+            ydl_download.download([video_url])
+
+        # پیدا کردن فایل دانلود شده
+        mp3_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.mp3')]
+        if mp3_files:
+            mp3_files.sort(
+                key=lambda x: os.path.getmtime(os.path.join(DOWNLOAD_DIR, x)),
+                reverse=True
+            )
+            file_path = os.path.join(DOWNLOAD_DIR, mp3_files[0])
+            if os.path.exists(file_path):
+                logger.info(f"✅ دانلود موفق: {title} - {artist}")
+                return file_path, {
+                    "title": title,
+                    "artist": artist,
+                    "duration": int(duration) if duration else 0
+                }
+
+        return None, "فایل دانلود شده یافت نشد."
 
     except Exception as e:
         logger.error(f"❌ خطا در دانلود: {str(e)}")
@@ -130,7 +125,7 @@ def download_audio(query: str):
 @app.on_message(filters.command("start"))
 async def start(_, message):
     await message.reply_text(
-        "👋 3سلام!\n"
+        "👋 سلام!\n"
         "نام آهنگ مورد نظرت را بنویس تا دانلود کنم.\n"
         "مثال: `Shape of You`"
     )
