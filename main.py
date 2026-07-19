@@ -2,9 +2,11 @@ import os
 import asyncio
 import logging
 import traceback
+import threading
+import http.server
+import socketserver
 import yt_dlp
 from pyrogram import Client, filters
-from pyrogram.types import Message
 from pyrogram.errors import RPCError
 
 # ================= تنظیمات لاگ‌نویسی =================
@@ -24,6 +26,18 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 app = Client("MyBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# ================= وب‌سرور برای Render (رفع مشکل پورت) =================
+def start_http_server():
+    """یک وب‌سرور ساده برای پاسخ به Health Check رندر"""
+    port = int(os.environ.get("PORT", 8080))
+    handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", port), handler) as httpd:
+        logger.info(f"🌐 وب‌سرور روی پورت {port} برای سلامت رندر فعال شد")
+        httpd.serve_forever()
+
+# اگر در محیط Render هستیم یا به‌طور کلی، وب‌سرور را در یک ترد جداگانه اجرا کن
+threading.Thread(target=start_http_server, daemon=True).start()
+
 # ================= تابع دانلود (همگام) =================
 def download_audio(query: str):
     """
@@ -31,7 +45,7 @@ def download_audio(query: str):
     خروجی: (مسیر_فایل, دیکشنری_متادیتا) یا (None, پیام_خطا)
     """
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio/best',  # بهترین فرمت صوتی موجود
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -39,16 +53,20 @@ def download_audio(query: str):
         }],
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
         'cookiefile': 'cookies.txt',  # استفاده از کوکی
-        'quiet': True,               # خروجی کم yt-dlp
+        'quiet': True,
         'no_warnings': True,
-        'default_search': 'ytsearch', # اگر آدرس نبود، جستجو کن
-        'noplaylist': True,           # فقط اولین آهنگ
+        'default_search': 'ytsearch',
+        'noplaylist': True,
+        # ====== تنظیمات جدید برای رفع خطای فرمت ======
+        'ignoreerrors': True,          # از خطاهای فرمت رد شو
+        'extractaudio': True,          # استخراج صوتی
+        'audioformat': 'mp3',          # خروجی نهایی mp3
+        'youtube_include_dash_manifest': False,  # جلوگیری از مشکل DASH
     }
 
     try:
         logger.info(f"🔍 شروع جستجو برای: {query}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # با ytsearch1 دقیقاً اولین نتیجه را می‌گیریم
             info = ydl.extract_info(f"ytsearch1:{query}", download=True)
 
             if not info or 'entries' not in info or len(info['entries']) == 0:
@@ -68,7 +86,6 @@ def download_audio(query: str):
             if not file_path or not os.path.exists(file_path):
                 mp3_files = [f for f in os.listdir(DOWNLOAD_DIR) if f.endswith('.mp3')]
                 if mp3_files:
-                    # مرتب‌سازی بر اساس زمان تغییر (جدیدترین)
                     mp3_files.sort(
                         key=lambda x: os.path.getmtime(os.path.join(DOWNLOAD_DIR, x)),
                         reverse=True
@@ -102,14 +119,14 @@ def download_audio(query: str):
 @app.on_message(filters.command("start"))
 async def start(_, message):
     await message.reply_text(
-        "👋 سلام!\n"
+        "👋2 سلام!\n"
         "نام آهنگ مورد نظرت را بنویس تا دانلود کنم.\n"
         "مثال: `Shape of You`"
     )
 
 # ================= دریافت متن کاربر (جستجوی آهنگ) =================
 @app.on_message(filters.text & ~filters.command("start"))
-async def handle_music(_, message: Message):
+async def handle_music(_, message):
     query = message.text.strip()
     if not query:
         return
