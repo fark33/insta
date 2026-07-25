@@ -17,10 +17,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ================= تنظیمات ربات =================
+# ================= متغیرهای محیطی =================
 API_ID = int(os.environ.get("API_ID", "3335796"))
 API_HASH = os.environ.get("API_HASH", "138b992a0e672e8346d8439c3f42ea78")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "5088657122:AAGGal-y6fXHjtwdD74AxE-dOWzPvcdfSjU")
+
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -28,32 +29,31 @@ COOKIE_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
 if COOKIE_FILE:
     logger.info("🍪 فایل کوکی پیدا شد و استفاده می‌شود.")
 
-# ایجاد کلاینت Pyrogram با پایداری شبکه در Render
+# ================= کلاینت پایروگرام =================
 app = Client(
     "MyBot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    ipv6=False
+    ipv6=False  # غیرفعال کردن IPv6 برای ثبات اتصال DC4 تلگرام روی سرورهای ابری
 )
 
-# ================= وب‌سرور برای Render =================
+# ================= وب‌سرور جهت پینگ Render =================
 def start_http_server():
     port = int(os.environ.get("PORT", 10000))
     handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", port), handler) as httpd:
-        logger.info(f"🌐 وب‌سرور روی پورت {port} فعال شد")
+        logger.info(f"🌐 وب‌سرور پینگ روی پورت {port} فعال شد.")
         httpd.serve_forever()
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود سریع و یکپارچه =================
+# ================= منطق دانلود سریع =================
 def download_audio(query: str):
     t_start = time.perf_counter()
-    logger.info(f"🔍 [شروع یکپارچه] جستجو و دانلود برای: '{query}'")
+    logger.info(f"⚡ [VERSION 2.0] دریافت درخواست جدید: '{query}'")
 
     download_opts = {
-        # دریافت مستقیم فایل m4a بدون نیاز به تبدیل سنگین FFmpeg
         'format': 'bestaudio[ext=m4a]/bestaudio/best',
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
         'quiet': True,
@@ -63,8 +63,7 @@ def download_audio(query: str):
         'concurrent_fragment_downloads': 4,
         'extractor_args': {
             'youtube': {
-                # استفاده از کلاینت‌های اندروید برای دور زدن پردازش جاوااسکریپت
-                'player_client': ['android', 'mweb'],
+                'player_client': ['android', 'mweb'],  # میانبر سنگینی جاوااسکریپت
             }
         },
     }
@@ -76,8 +75,6 @@ def download_audio(query: str):
         with yt_dlp.YoutubeDL(download_opts) as ydl:
             info = ydl.extract_info(search_target, download=True)
         t_ydl_end = time.perf_counter()
-        
-        logger.info(f"⏱️ [زمان yt-dlp] استخراج و دانلود مستقیم: {t_ydl_end - t_ydl_start:.2f} ثانیه")
 
         if not info:
             return None, "هیچ آهنگی پیدا نشد."
@@ -98,7 +95,7 @@ def download_audio(query: str):
         duration = int(entry.get('duration') or 0)
 
         t_total = time.perf_counter() - t_start
-        logger.info(f"✅ [کل زمان پردازش دانلود]: {t_total:.2f} ثانیه")
+        logger.info(f"⏱️ [yt-dlp] استخراج و دانلود مستقیم در {t_ydl_end - t_ydl_start:.2f} ثانیه (زمان کل پردازش: {t_total:.2f} ثانیه)")
 
         return file_path, {
             "title": title,
@@ -106,23 +103,19 @@ def download_audio(query: str):
             "duration": duration,
         }
 
-    except yt_dlp.utils.DownloadError as e:
-        logger.error(f"❌ خطای yt-dlp: {e}")
-        return None, "دانلود ناموفق بود."
     except Exception as e:
-        logger.error(f"❌ خطای غیرمنتظره: {e}\n{traceback.format_exc()}")
-        return None, f"خطا: {str(e)}"
+        logger.error(f"❌ خطای yt-dlp: {e}\n{traceback.format_exc()}")
+        return None, f"خطا در دریافت فایل: {str(e)}"
 
 # ================= دستور /start =================
 @app.on_message(filters.command("start"))
 async def start(_, message):
     await message.reply_text(
-        "👋 سلام!\n"
-        "نام آهنگ مورد نظرت را بنویس تا دانلود کنم.\n"
-        "مثال: `Shape of You`"
+        "👋 **سلام! به ربات دانلود موزیک خوش آمدید.**\n\n"
+        "کافیست نام آهنگ یا لینک یوتیوب را بفرستید تا سریعاً دانلود شود."
     )
 
-# ================= دریافت متن کاربر =================
+# ================= هندلر دریافت متن =================
 @app.on_message(filters.text & ~filters.command("start"))
 async def handle_music(_, message):
     query = message.text.strip()
@@ -130,13 +123,12 @@ async def handle_music(_, message):
         return
 
     t_req_start = time.perf_counter()
-    status_msg = await message.reply_text(f"🔍 در حال پردازش: **{query}** ...")
+    status_msg = await message.reply_text(f"🔍 در حال جستجو و دانلود: **{query}** ...")
     file_path = None
 
     try:
         logger.info(f"📩 درخواست جدید از کاربر {message.from_user.id}: {query}")
 
-        # دانلود یکپارچه
         result, meta = await asyncio.to_thread(download_audio, query)
         t_dl_done = time.perf_counter()
 
@@ -151,7 +143,6 @@ async def handle_music(_, message):
 
         await status_msg.edit_text(f"📤 در حال ارسال **{title}** به تلگرام ...")
 
-        # آپلود به تلگرام
         t_up_start = time.perf_counter()
         await message.reply_audio(
             audio=file_path,
@@ -163,16 +154,11 @@ async def handle_music(_, message):
         await status_msg.delete()
         t_up_end = time.perf_counter()
 
-        # ثبت گزارش زمان‌بندی
-        time_dl = t_dl_done - t_req_start
-        time_up = t_up_end - t_up_start
-        time_total = t_up_end - t_req_start
-
         logger.info(
-            f"📊 [آمار زمان‌بندی دقیق]\n"
-            f" ├ ⏱️ دانلود از یوتیوب: {time_dl:.2f} ثانیه\n"
-            f" ├ 📤 آپلود به تلگرام: {time_up:.2f} ثانیه\n"
-            f" └ 🚀 کل زمان پاسخ‌دهی: {time_total:.2f} ثانیه"
+            f"📊 [گزارش زمان‌بندی V2.0]\n"
+            f" ├ ⏱️ زمان دانلود: {t_dl_done - t_req_start:.2f} ثانیه\n"
+            f" ├ 📤 زمان آپلود: {t_up_end - t_up_start:.2f} ثانیه\n"
+            f" └ 🚀 زمان کل: {t_up_end - t_req_start:.2f} ثانیه"
         )
 
     except RPCError as e:
@@ -180,7 +166,7 @@ async def handle_music(_, message):
         await status_msg.edit_text("❌ خطا در ارسال فایل به تلگرام.")
     except Exception as e:
         logger.error(f"❌ خطای غیرمنتظره: {e}")
-        await status_msg.edit_text("❌ خطایی رخ داد.")
+        await status_msg.edit_text("❌ خطایی در پردازش رخ داد.")
     finally:
         if file_path and os.path.exists(file_path):
             try:
@@ -188,7 +174,7 @@ async def handle_music(_, message):
             except Exception:
                 pass
 
-# ================= اجرای ربات =================
+# ================= اجرا =================
 if __name__ == "__main__":
-    logger.info("🚀 ربات با بهینه‌سازی کامل راه‌اندازی شد...")
+    logger.info("🚀 [VERSION 2.0] ربات با بهینه‌سازی کامل راه‌اندازی شد...")
     app.run()
