@@ -95,8 +95,9 @@ def download_audio(query: str):
                 'preferredcodec': 'm4a',
             }],
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': False,
+            'no_warnings': False,
+            'verbose': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
             # فقط کلاینت tv را امتحان کن — همان چیزی است که فرمت نهایی را می‌دهد؛
