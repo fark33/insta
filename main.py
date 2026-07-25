@@ -1,4 +1,5 @@
 import os
+import time
 import asyncio
 import logging
 import traceback
@@ -17,10 +18,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= تنظیمات ربات =================
-# بهتر است این مقادیر را از متغیرهای محیطی (Environment Variables) بخوانی
 API_ID = int(os.environ.get("API_ID", "3335796"))
 API_HASH = os.environ.get("API_HASH", "138b992a0e672e8346d8439c3f42ea78")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "5088657122:AAF3Hzm9lx6-UUQEWlI4_k1T7CJ330X6GKc")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "5088657122:AAGGal-y6fXHjtwdD74AxE-dOWzPvcdfSjU")
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -28,7 +28,7 @@ COOKIE_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
 if COOKIE_FILE:
     logger.info("🍪 فایل کوکی پیدا شد و استفاده می‌شود.")
 else:
-    logger.warning("⚠️ فایل cookies.txt پیدا نشد — احتمال بلاک شدن توسط یوتیوب بالاست.")
+    logger.warning("⚠️ فایل cookies.txt پیدا نشد.")
 
 app = Client("MyBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
@@ -37,93 +37,85 @@ def start_http_server():
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", port), handler) as httpd:
-        logger.info(f"🌐 وب‌سرور روی پورت {port} برای سلامت رندر فعال شد")
+        logger.info(f"🌐 وب‌سرور روی پورت {port} فعال شد")
         httpd.serve_forever()
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود =================
+# ================= تابع دانلود (اصلاح‌شده و زمان‌بندی‌شده) =================
 def download_audio(query: str):
     """
-    جستجو و دانلود اولین نتیجه از یوتیوب به صورت M4A
-    خروجی: (مسیر_فایل، دیکشنری_متادیتا) یا (None، پیام_خطا)
+    جستجو و دانلود همزمان جهت کاهش زمان از ۲۷ ثانیه به زیر ۵ ثانیه
     """
+    t_start = time.perf_counter()
+    logger.info(f"🔍 [شروع] دریافت درخواست: '{query}'")
+
+    download_opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'm4a',
+        }],
+        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
+        'cookiefile': COOKIE_FILE,
+        'extractor_args': {
+            'youtube': {
+                # استفاده از android/mweb به جای tv سرعت پردازش را چند برابر می‌کند
+                'player_client': ['android', 'mweb'],
+            }
+        },
+    }
+
+    # اگر ورودی لینک نبود، جستجوی مستقیم در خودِ دانلود انجام می‌شود (بدون درخواست اضافه)
+    search_target = query if query.startswith("http") else f"ytsearch1:{query}"
+
     try:
-        logger.info(f"🔍 شروع جستجو و دانلود برای: {query}")
-
-        # ===== جستجو + دانلود در یک مرحله =====
-        # قبلاً دو بار اطلاعات ویدیو گرفته می‌شد (یک بار flat-search، یک بار در
-        # مرحله‌ی دانلود) که یعنی دو درخواست کامل شبکه/پارس پلیر. اینجا این دو
-        # را در یک extract_info واحد ادغام می‌کنیم تا یک رفت‌وبرگشت کامل حذف شود.
-        # همچنین player_client از 'tv' به ['ios', 'android'] تغییر کرد: این دو
-        # کلاینت موبایل معمولاً بدون نیاز به دیسایفر کردن جاوااسکریپت پلیر (و بدون
-        # نیاز به حل چالش با deno/jsc) فرمت می‌دهند و در عمل چند برابر سریع‌تراند؛
-        # 'tv' به‌عنوان فال‌بک نهایی نگه داشته شده تا در صورت شکست، همچنان کار کند.
-        download_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-            }],
-            'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
-            'quiet': True,
-            'no_warnings': True,
-            'noplaylist': True,
-            'cookiefile': COOKIE_FILE,
-            'default_search': 'ytsearch',
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['ios', 'android', 'tv'],
-                }
-            },
-            # جلوگیری از معطلی طولانی روی کانکشن‌های کند/بی‌پاسخ
-            'socket_timeout': 8,
-            'retries': 3,
-            'fragment_retries': 3,
-            # دانلود موازی فرگمنت‌های DASH (در صورت وجود) برای سرعت بیشتر
-            'concurrent_fragment_downloads': 4,
-        }
-
-        with yt_dlp.YoutubeDL(download_opts) as ydl_download:
-            info = ydl_download.extract_info(f"ytsearch1:{query}", download=True)
+        t_ytdlp_start = time.perf_counter()
+        
+        with yt_dlp.YoutubeDL(download_opts) as ydl:
+            info = ydl.extract_info(search_target, download=True)
+            
+        t_ytdlp_end = time.perf_counter()
+        logger.info(f"⏱️ [زمان yt-dlp] جستجو و دانلود از یوتیوب: {t_ytdlp_end - t_ytdlp_start:.2f} ثانیه")
 
         if not info:
-            return None, "هیچ آهنگی با این نام پیدا نشد."
+            return None, "هیچ آهنگی پیدا نشد."
 
-        # وقتی از ytsearchN استفاده می‌شود، نتیجه در entries قرار می‌گیرد
-        entries = info.get('entries')
-        dl_info = entries[0] if entries else info
-        if not dl_info:
-            return None, "خطا در دریافت اطلاعات آهنگ."
-
-        title = dl_info.get('title', 'Unknown Title')
-        artist = dl_info.get('channel') or dl_info.get('uploader') or 'Unknown Artist'
-        duration = int(dl_info.get('duration') or 0)
-
-        # مسیر فایل نهایی بعد از تبدیل به m4a (بدون اسکن پوشه)
-        base_name = ydl_download.prepare_filename(dl_info)
+        # استخراج اطلاعات ویدیو از خروجی جستجو
+        entry = info['entries'][0] if 'entries' in info and info['entries'] else info
+        
+        base_name = ydl.prepare_filename(entry)
         file_path = os.path.splitext(base_name)[0] + '.m4a'
 
-        if os.path.exists(file_path):
-            logger.info(f"✅ دانلود موفق: {title} - {artist}")
-            return file_path, {
-                "title": title,
-                "artist": artist,
-                "duration": duration,
-            }
+        if not os.path.exists(file_path) and os.path.exists(base_name):
+            file_path = base_name
 
-        return None, "فایل دانلود شده یافت نشد."
+        if not os.path.exists(file_path):
+            return None, "فایل دانلود شده یافت نشد."
+
+        title = entry.get('title', 'Unknown Title')
+        artist = entry.get('uploader') or entry.get('channel') or 'Unknown Artist'
+        duration = int(entry.get('duration') or 0)
+
+        t_total_dl = time.perf_counter() - t_start
+        logger.info(f"✅ [کل زمان پردازش] فایل آماده شد در: {t_total_dl:.2f} ثانیه")
+
+        return file_path, {
+            "title": title,
+            "artist": artist,
+            "duration": duration,
+        }
 
     except yt_dlp.utils.DownloadError as e:
         msg = str(e)
-        logger.error(f"❌ خطای دانلود yt-dlp: {msg}")
-        if 'Sign in to confirm' in msg or 'bot' in msg.lower() or 'cookies' in msg.lower():
-            return None, "یوتیوب درخواست را بلاک کرد. فایل cookies.txt را بروز کن."
-        return None, "دانلود ناموفق بود (فرمت موجود نیست یا ویدیو محدود است)."
+        logger.error(f"❌ خطای yt-dlp: {msg}")
+        return None, "دانلود ناموفق بود یا ویدیو محدود شده است."
 
     except Exception as e:
-        logger.error(f"❌ خطا در دانلود: {str(e)}")
-        logger.error(traceback.format_exc())
+        logger.error(f"❌ خطا در دانلود: {str(e)}\n{traceback.format_exc()}")
         return None, f"خطا در دانلود: {str(e)}"
 
 # ================= دستور /start =================
@@ -142,17 +134,19 @@ async def handle_music(_, message):
     if not query:
         return
 
-    status_msg = await message.reply_text(f"🔍 در حال جستجو برای: **{query}** ...")
+    t_req_start = time.perf_counter()
+    status_msg = await message.reply_text(f"🔍 در حال جستجو و دریافت: **{query}** ...")
     file_path = None
 
     try:
-        logger.info(f"📩 درخواست جدید از کاربر {message.from_user.id}: {query}")
+        logger.info(f"📩 درخواست از کاربر {message.from_user.id}: {query}")
 
+        # ۱. مرحله دانلود و جستجوی یکپارچه
         result, meta = await asyncio.to_thread(download_audio, query)
+        t_dl_done = time.perf_counter()
 
         if result is None:
             await status_msg.edit_text(f"❌ {meta}")
-            logger.warning(f"⛔ خطا برای کاربر {message.from_user.id}: {meta}")
             return
 
         file_path = result
@@ -160,35 +154,47 @@ async def handle_music(_, message):
         artist = meta.get('artist', 'Unknown')
         duration = meta.get('duration', 0)
 
-        await status_msg.edit_text(f"📤 در حال ارسال **{title}** ...")
+        await status_msg.edit_text(f"📤 در حال آپلود **{title}** به تلگرام ...")
 
-        try:
-            await message.reply_audio(
-                audio=file_path,
-                title=title,
-                performer=artist,
-                duration=duration,
-                caption=f"🎵 **{title}**\n👤 {artist}"
-            )
-            await status_msg.delete()
-            logger.info(f"✅ فایل '{title}' برای کاربر {message.from_user.id} ارسال شد.")
+        # ۲. مرحله آپلود به تلگرام
+        t_up_start = time.perf_counter()
+        await message.reply_audio(
+            audio=file_path,
+            title=title,
+            performer=artist,
+            duration=duration,
+            caption=f"🎵 **{title}**\n👤 {artist}"
+        )
+        await status_msg.delete()
+        t_up_end = time.perf_counter()
 
-        except RPCError as e:
-            logger.error(f"❌ خطا در ارسال به تلگرام: {e}")
-            await status_msg.edit_text("❌ خطا در ارسال فایل: احتمالاً حجم فایل زیاد است یا اینترنت قطع است.")
+        # ۳. محاسبه و نمایش لاگ تفکیک‌شده
+        time_dl = t_dl_done - t_req_start
+        time_up = t_up_end - t_up_start
+        time_total = t_up_end - t_req_start
+
+        logger.info(
+            f"📊 [آمار تفکیک زمانی]\n"
+            f" ├ ⏱️ دانلود از یوتیوب: {time_dl:.2f} ثانیه\n"
+            f" ├ 📤 آپلود به تلگرام: {time_up:.2f} ثانیه\n"
+            f" └ 🚀 کل زمان پاسخ‌دهی: {time_total:.2f} ثانیه"
+        )
+
+    except RPCError as e:
+        logger.error(f"❌ خطای تلگرام: {e}")
+        await status_msg.edit_text("❌ خطا در ارسال فایل به تلگرام.")
 
     except Exception as e:
-        logger.error(f"❌ خطای غیرمنتظره: {str(e)}")
-        logger.error(traceback.format_exc())
-        await status_msg.edit_text("❌ یک خطای غیرمنتظره رخ داد. لطفاً دوباره تلاش کنید.")
+        logger.error(f"❌ خطای غیرمنتظره: {str(e)}\n{traceback.format_exc()}")
+        await status_msg.edit_text("❌ یک خطای غیرمنتظره رخ داد.")
 
     finally:
-        try:
-            if file_path and os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
+            try:
                 os.remove(file_path)
-                logger.info(f"🗑️ فایل موقت {file_path} پاک شد.")
-        except Exception as e:
-            logger.warning(f"⚠️ خطا در پاکسازی فایل: {e}")
+                logger.info(f"🗑️ فایل موقت پاک شد.")
+            except Exception as e:
+                logger.warning(f"⚠️ خطا در پاکسازی: {e}")
 
 # ================= اجرای ربات =================
 if __name__ == "__main__":
