@@ -4,11 +4,14 @@ FROM python:3.11-slim
 # تنظیم دایرکتوری کاری
 WORKDIR /app
 
-# نصب ابزارهای مورد نیاز سیستم (FFmpeg و curl/unzip برای نصب Deno)
+# نصب ابزارهای مورد نیاز سیستم (FFmpeg، curl/unzip برای Deno، و clang برای ساخت ytdlp-jsc)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
     unzip \
+    clang \
+    libclang-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # نصب Deno (برای حل چالش JS یوتیوب توسط yt-dlp — حداقل نسخه‌ی موردنیاز یت‌دی‌ال‌پی)
