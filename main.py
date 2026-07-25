@@ -27,16 +27,15 @@ DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 COOKIE_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
-if COOKIE_FILE:
-    logger.info("🍪 فایل کوکی پیدا شد و استفاده می‌شود.")
 
-# ================= کلاینت پایروگرام =================
+# ================= کلاینت پایروگرام (بهینه‌شده برای شبکه) =================
 app = Client(
     "MyBot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    ipv6=False  # غیرفعال کردن IPv6 جهت پایداری شبکه در سرور Render
+    ipv6=False,
+    max_concurrent_transfers=3  # جلوگیری از تایم‌اوت آپلود در Render
 )
 
 # ================= وب‌سرور جهت پینگ Render =================
@@ -44,7 +43,6 @@ def start_http_server():
     port = int(os.environ.get("PORT", 10000))
     handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", port), handler) as httpd:
-        logger.info(f"🌐 وب‌سرور پینگ روی پورت {port} فعال شد.")
         httpd.serve_forever()
 
 threading.Thread(target=start_http_server, daemon=True).start()
@@ -52,11 +50,10 @@ threading.Thread(target=start_http_server, daemon=True).start()
 # ================= منطق دانلود سریع =================
 def download_audio(query: str):
     t_start = time.perf_counter()
-    logger.info(f"⚡ [VERSION 2.3] دریافت درخواست جدید: '{query}'")
 
     download_opts = {
-        # اولویت با فایل صوتی خالص؛ در صورت عدم وجود، سوئیچ به best جهت جلوگیری از خطا
-        'format': 'bestaudio/ba/best',
+        # اولویت با فرمت‌های سبک m4a و webm جهت افزایش سرعت دانلود
+        'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/ba/best',
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
@@ -77,8 +74,6 @@ def download_audio(query: str):
             return None, "هیچ آهنگی پیدا نشد."
 
         entry = info['entries'][0] if 'entries' in info and info['entries'] else info
-        
-        # دریافت مسیر کامل و پسوند واقعی فایل دانلود شده
         file_path = ydl.prepare_filename(entry)
 
         if not os.path.exists(file_path):
@@ -89,7 +84,7 @@ def download_audio(query: str):
         duration = int(entry.get('duration') or 0)
 
         t_total = time.perf_counter() - t_start
-        logger.info(f"⏱️ [yt-dlp] استخراج فایل در {t_ydl_end - t_ydl_start:.2f} ثانیه (زمان کل پردازش: {t_total:.2f} ثانیه)")
+        logger.info(f"⏱️ [yt-dlp] دریافت استریم در {t_ydl_end - t_ydl_start:.2f} ثانیه (کل پردازش: {t_total:.2f} ثانیه)")
 
         return file_path, {
             "title": title,
@@ -100,14 +95,6 @@ def download_audio(query: str):
     except Exception as e:
         logger.error(f"❌ خطای yt-dlp: {e}\n{traceback.format_exc()}")
         return None, f"خطا در دریافت فایل: {str(e)}"
-
-# ================= دستور /start =================
-@app.on_message(filters.command("start"))
-async def start(_, message):
-    await message.reply_text(
-        "👋 **سلام! به ربات دانلود موزیک خوش آمدید.**\n\n"
-        "کافیست نام آهنگ یا لینک یوتیوب را بفرستید تا سریعاً دانلود شود."
-    )
 
 # ================= هندلر دریافت متن =================
 @app.on_message(filters.text & ~filters.command("start"))
@@ -122,8 +109,6 @@ async def handle_music(_, message):
     file_path = None
 
     try:
-        logger.info(f"📩 درخواست جدید از کاربر {message.from_user.id}: {query}")
-
         result, meta = await asyncio.to_thread(download_audio, query)
         t_dl_done = time.perf_counter()
 
@@ -136,7 +121,6 @@ async def handle_music(_, message):
         artist = meta.get('artist', 'Unknown')
         duration = meta.get('duration', 0)
 
-        # ایمن‌سازی متون برای جلوگیری از خطاهای ParseMode تلگرام
         safe_title = html.escape(title)
         safe_artist = html.escape(artist)
 
@@ -154,7 +138,7 @@ async def handle_music(_, message):
         t_up_end = time.perf_counter()
 
         logger.info(
-            f"📊 [گزارش زمان‌بندی V2.3]\n"
+            f"📊 [گزارش زمان‌بندی V2.4]\n"
             f" ├ ⏱️ زمان دانلود: {t_dl_done - t_req_start:.2f} ثانیه\n"
             f" ├ 📤 زمان آپلود: {t_up_end - t_up_start:.2f} ثانیه\n"
             f" └ 🚀 زمان کل: {t_up_end - t_req_start:.2f} ثانیه"
@@ -173,7 +157,5 @@ async def handle_music(_, message):
             except Exception:
                 pass
 
-# ================= اجرا =================
 if __name__ == "__main__":
-    logger.info("🚀 [VERSION 2.3] ربات با سیستم هوشمند Fallback راه‌اندازی شد...")
     app.run()
