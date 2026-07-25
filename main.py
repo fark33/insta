@@ -95,16 +95,13 @@ def download_audio(query: str):
                 'preferredcodec': 'm4a',
             }],
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
-            'quiet': True,
-            'no_warnings': True,
+            # موقتاً quiet/no_warnings را خاموش می‌کنیم تا لاگ حل چالش JS دیده شود
+            'quiet': False,
+            'no_warnings': False,
+            'verbose': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
-            # فقط android — ترکیب چند کلاینت با کوکی باعث کانفلیکت فرمت می‌شود
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            },
+            # اجازه می‌دهیم yt-dlp خودش کلاینت مناسب (با پشتیبانی حل چالش JS) را انتخاب کند
             # توجه: ignoreerrors را عمداً حذف کردیم تا خطای واقعی دیده شود
         }
 
