@@ -27,15 +27,17 @@ DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 COOKIE_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
+if COOKIE_FILE:
+    logger.info("🍪 فایل کوکی پیدا شد و استفاده می‌شود.")
 
-# ================= کلاینت پایروگرام (بهینه‌شده برای شبکه) =================
+# ================= کلاینت پایروگرام =================
 app = Client(
     "MyBot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
     ipv6=False,
-    max_concurrent_transfers=3  # جلوگیری از تایم‌اوت آپلود در Render
+    workers=4
 )
 
 # ================= وب‌سرور جهت پینگ Render =================
@@ -43,6 +45,7 @@ def start_http_server():
     port = int(os.environ.get("PORT", 10000))
     handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", port), handler) as httpd:
+        logger.info(f"🌐 وب‌سرور پینگ روی پورت {port} فعال شد.")
         httpd.serve_forever()
 
 threading.Thread(target=start_http_server, daemon=True).start()
@@ -52,8 +55,8 @@ def download_audio(query: str):
     t_start = time.perf_counter()
 
     download_opts = {
-        # اولویت با فرمت‌های سبک m4a و webm جهت افزایش سرعت دانلود
-        'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/ba/best',
+        # حذف webm؛ اولویت مطلق با استریم صوتی m4a (همراه با Fallback امن)
+        'format': 'bestaudio[ext=m4a]/bestaudio/ba/best',
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
@@ -84,7 +87,7 @@ def download_audio(query: str):
         duration = int(entry.get('duration') or 0)
 
         t_total = time.perf_counter() - t_start
-        logger.info(f"⏱️ [yt-dlp] دریافت استریم در {t_ydl_end - t_ydl_start:.2f} ثانیه (کل پردازش: {t_total:.2f} ثانیه)")
+        logger.info(f"⏱️ [yt-dlp] دریافت استریم m4a در {t_ydl_end - t_ydl_start:.2f} ثانیه (کل پردازش: {t_total:.2f} ثانیه)")
 
         return file_path, {
             "title": title,
@@ -95,6 +98,14 @@ def download_audio(query: str):
     except Exception as e:
         logger.error(f"❌ خطای yt-dlp: {e}\n{traceback.format_exc()}")
         return None, f"خطا در دریافت فایل: {str(e)}"
+
+# ================= دستور /start =================
+@app.on_message(filters.command("start"))
+async def start(_, message):
+    await message.reply_text(
+        "👋 **سلام! به ربات دانلود موزیک خوش آمدید.**\n\n"
+        "کافیست نام آهنگ یا لینک یوتیوب را بفرستید تا سریعاً دانلود شود."
+    )
 
 # ================= هندلر دریافت متن =================
 @app.on_message(filters.text & ~filters.command("start"))
@@ -138,7 +149,7 @@ async def handle_music(_, message):
         t_up_end = time.perf_counter()
 
         logger.info(
-            f"📊 [گزارش زمان‌بندی V2.4]\n"
+            f"📊 [گزارش زمان‌بندی V2.6]\n"
             f" ├ ⏱️ زمان دانلود: {t_dl_done - t_req_start:.2f} ثانیه\n"
             f" ├ 📤 زمان آپلود: {t_up_end - t_up_start:.2f} ثانیه\n"
             f" └ 🚀 زمان کل: {t_up_end - t_req_start:.2f} ثانیه"
@@ -158,4 +169,5 @@ async def handle_music(_, message):
                 pass
 
 if __name__ == "__main__":
+    logger.info("🚀 [VERSION 2.6] ربات با فرمت اختصاصی m4a راه‌اندازی شد...")
     app.run()
