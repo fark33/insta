@@ -1,4 +1,4 @@
-pyrogram
+pyrogram>=2.0.106
 tgcrypto
-requests
-yt-dlp>=2026.7.4
+yt-dlp[default]>=2026.3.0
+ytdlp-jsc
