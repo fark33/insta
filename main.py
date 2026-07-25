@@ -95,13 +95,18 @@ def download_audio(query: str):
                 'preferredcodec': 'm4a',
             }],
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
-            # موقتاً quiet/no_warnings را خاموش می‌کنیم تا لاگ حل چالش JS دیده شود
-            'quiet': False,
-            'no_warnings': False,
-            'verbose': True,
+            'quiet': True,
+            'no_warnings': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
-            # اجازه می‌دهیم yt-dlp خودش کلاینت مناسب (با پشتیبانی حل چالش JS توسط deno) را انتخاب کند
+            # فقط کلاینت tv را امتحان کن — همان چیزی است که فرمت نهایی را می‌دهد؛
+            # حذف web_safari/tv_downgraded چند درخواست شبکه‌ی اضافه را حذف می‌کند
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['tv'],
+                }
+            },
+            # اجازه می‌دهیم yt-dlp خودش بین ytdlp-jsc (سریع، بدون پروسه‌ی جدا) و deno انتخاب کند
             # توجه: ignoreerrors را عمداً حذف کردیم تا خطای واقعی دیده شود
         }
 
