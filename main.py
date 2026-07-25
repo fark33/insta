@@ -55,14 +55,19 @@ def download_audio(query: str):
     t_start = time.perf_counter()
 
     download_opts = {
-        # حذف webm؛ اولویت مطلق با استریم صوتی m4a (همراه با Fallback امن)
-        'format': 'bestaudio[ext=m4a]/bestaudio/ba/best',
+        # فرمت اختصاصی M4A با بالا‌ترین اولویت + حذف کامل webm
+        'format': 'bestaudio[ext=m4a]/bestaudio/ba',
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
         'cookiefile': COOKIE_FILE,
+        
+        # --- بهینه‌سازی‌های ویژه سرعت (Turbo Speed) ---
         'concurrent_fragment_downloads': 4,
+        'http_chunk_size': 1048576,  # چانک‌های ۱ مگابایتی برای حداکثر پهنای باند
+        'nocheckcertificate': True,
+        'geo_bypass': True,
     }
 
     search_target = query if query.startswith("http") else f"ytsearch1:{query}"
@@ -149,7 +154,7 @@ async def handle_music(_, message):
         t_up_end = time.perf_counter()
 
         logger.info(
-            f"📊 [گزارش زمان‌بندی V2.6]\n"
+            f"📊 [گزارش زمان‌بندی V2.6 Turbo]\n"
             f" ├ ⏱️ زمان دانلود: {t_dl_done - t_req_start:.2f} ثانیه\n"
             f" ├ 📤 زمان آپلود: {t_up_end - t_up_start:.2f} ثانیه\n"
             f" └ 🚀 زمان کل: {t_up_end - t_req_start:.2f} ثانیه"
@@ -169,5 +174,5 @@ async def handle_music(_, message):
                 pass
 
 if __name__ == "__main__":
-    logger.info("🚀 [VERSION 2.6] ربات با فرمت اختصاصی m4a راه‌اندازی شد...")
+    logger.info("🚀 [VERSION 2.6 Turbo] ربات با فرمت اختصاصی m4a و دانلود فوق‌سریع راه‌اندازی شد...")
     app.run()
