@@ -101,6 +101,9 @@ def download_audio(query: str):
             'verbose': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
+            # yt-dlp به‌صورت پیش‌فرض فقط دنبال deno می‌گردد؛ چون در Dockerfile فقط node نصب شده
+            # باید صریحاً بگوییم از node به‌عنوان JS runtime استفاده کند
+            'js_runtimes': {'node': {}},
             # اجازه می‌دهیم yt-dlp خودش کلاینت مناسب (با پشتیبانی حل چالش JS) را انتخاب کند
             # توجه: ignoreerrors را عمداً حذف کردیم تا خطای واقعی دیده شود
         }
