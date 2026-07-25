@@ -54,8 +54,29 @@ threading.Thread(target=start_http_server, daemon=True).start()
 def download_audio(query: str):
     t_start = time.perf_counter()
 
+    # ۱. مرحله جستجوی متنی سبک و فوری (تولید ID بدون پردازش متادیتای سنگین)
+    target_url = query
+    if not query.startswith("http"):
+        flat_opts = {
+            'extract_flat': 'in_playlist',
+            'skip_download': True,
+            'quiet': True,
+            'cookiefile': COOKIE_FILE,
+        }
+        try:
+            with yt_dlp.YoutubeDL(flat_opts) as ydl_flat:
+                search_res = ydl_flat.extract_info(f"ytsearch1:{query}", download=False)
+                if search_res and 'entries' in search_res and search_res['entries']:
+                    video_id = search_res['entries'][0]['id']
+                    target_url = f"https://www.youtube.com/watch?v={video_id}"
+                else:
+                    return None, "هیچ آهنگی پیدا نشد."
+        except Exception as e:
+            logger.error(f"❌ خطای جستجوی سریع: {e}")
+            target_url = f"ytsearch1:{query}"
+
+    # ۲. تنظیمات اصلی دانلود با ای‌پیوای اندروید و حذف منیفست‌های سنگین
     download_opts = {
-        # فرمت 140 اختصاصی m4a است که سرعت آنالیز را فوق‌العاده بالا می‌برد
         'format': '140/bestaudio[ext=m4a]/bestaudio/ba',
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
         'quiet': True,
@@ -63,27 +84,29 @@ def download_audio(query: str):
         'noplaylist': True,
         'cookiefile': COOKIE_FILE,
         
-        # --- حذف آنالیزهای سنگین منیفست (کاهش زمان پردازش از ۲۰s به زیر ۵s) ---
+        # دور زدن پردازش جاوااسکریپت کلاینت وب و تاخیر دیتاسنتر
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'ios']
+            }
+        },
+        
         'youtube_include_dash_manifest': False,
         'youtube_include_hls_manifest': False,
-        
-        # --- بهینه‌سازی‌های شبکه ---
         'concurrent_fragment_downloads': 4,
-        'http_chunk_size': 1048576,  # چانک‌های ۱ مگابایتی
+        'http_chunk_size': 1048576,
         'nocheckcertificate': True,
         'geo_bypass': True,
     }
 
-    search_target = query if query.startswith("http") else f"ytsearch1:{query}"
-
     try:
         t_ydl_start = time.perf_counter()
         with yt_dlp.YoutubeDL(download_opts) as ydl:
-            info = ydl.extract_info(search_target, download=True)
+            info = ydl.extract_info(target_url, download=True)
         t_ydl_end = time.perf_counter()
 
         if not info:
-            return None, "هیچ آهنگی پیدا نشد."
+            return None, "اطلاعات فایل دریافت نشد."
 
         entry = info['entries'][0] if 'entries' in info and info['entries'] else info
         file_path = ydl.prepare_filename(entry)
@@ -158,7 +181,7 @@ async def handle_music(_, message):
         t_up_end = time.perf_counter()
 
         logger.info(
-            f"📊 [گزارش زمان‌بندی Ultra Fast]\n"
+            f"📊 [گزارش زمان‌بندی V2.7 Extreme]\n"
             f" ├ ⏱️ زمان دانلود: {t_dl_done - t_req_start:.2f} ثانیه\n"
             f" ├ 📤 زمان آپلود: {t_up_end - t_up_start:.2f} ثانیه\n"
             f" └ 🚀 زمان کل: {t_up_end - t_req_start:.2f} ثانیه"
@@ -171,6 +194,7 @@ async def handle_music(_, message):
         logger.error(f"❌ خطای غیرمنتظره: {e}")
         await status_msg.edit_text("❌ خطایی در پردازش رخ داد.")
     finally:
+        # پاکسازی فایل از دیسک جهت جلوگیری از پر شدن حافظه Render
         if file_path and os.path.exists(file_path):
             try:
                 os.remove(file_path)
@@ -178,5 +202,5 @@ async def handle_music(_, message):
                 pass
 
 if __name__ == "__main__":
-    logger.info("🚀 [VERSION Ultra Fast] ربات آماده به‌کار شد...")
+    logger.info("🚀 [VERSION V2.7 Extreme] ربات آماده به‌کار شد...")
     app.run()
