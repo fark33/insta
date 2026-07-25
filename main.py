@@ -45,7 +45,7 @@ threading.Thread(target=start_http_server, daemon=True).start()
 # ================= تابع دانلود =================
 def download_audio(query: str):
     """
-    جستجو و دانلود اولین نتیجه از یوتیوب به صورت MP3 با کیفیت 192
+    جستجو و دانلود اولین نتیجه از یوتیوب به صورت M4A
     خروجی: (مسیر_فایل، دیکشنری_متادیتا) یا (None، پیام_خطا)
     """
     try:
@@ -87,24 +87,22 @@ def download_audio(query: str):
 
         logger.info(f"✅ پیدا شد: {title} - {artist}")
 
-        # ===== مرحله ۲: دانلود با فرمت انعطاف‌پذیر =====
-        # کلید فیکس: bestaudio/best (اگر صوتی خالص نبود، بهترین فرمت ترکیبی)
+        # ===== مرحله ۲: دانلود با فرمت انعطاف‌پذیر (خروجی m4a) =====
         download_opts = {
-            'format': 'bestaudio/best',
+            'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
+                'preferredcodec': 'm4a',
             }],
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
-            # استفاده از کلاینت‌های مختلف برای دور زدن محدودیت فرمت در سرورهای ابری
+            # فقط android — ترکیب چند کلاینت با کوکی باعث کانفلیکت فرمت می‌شود
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web_safari', 'web'],
+                    'player_client': ['android'],
                 }
             },
             # توجه: ignoreerrors را عمداً حذف کردیم تا خطای واقعی دیده شود
@@ -113,9 +111,9 @@ def download_audio(query: str):
         with yt_dlp.YoutubeDL(download_opts) as ydl_download:
             logger.info(f"⬇️ شروع دانلود: {title}")
             dl_info = ydl_download.extract_info(video_url, download=True)
-            # مسیر فایل نهایی بعد از تبدیل به mp3 (بدون اسکن پوشه)
+            # مسیر فایل نهایی بعد از تبدیل به m4a (بدون اسکن پوشه)
             base_name = ydl_download.prepare_filename(dl_info)
-            file_path = os.path.splitext(base_name)[0] + '.mp3'
+            file_path = os.path.splitext(base_name)[0] + '.m4a'
             duration = int(dl_info.get('duration') or entry.get('duration') or 0)
 
         if os.path.exists(file_path):
