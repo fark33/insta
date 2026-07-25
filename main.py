@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 # بهتر است این مقادیر را از متغیرهای محیطی (Environment Variables) بخوانی
 API_ID = int(os.environ.get("API_ID", "3335796"))
 API_HASH = os.environ.get("API_HASH", "138b992a0e672e8346d8439c3f42ea78")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "5098580833:AAEzriKZYpbJOljEwP-8KrOsYlGY-hRyDXA")
-
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "5088657122:AAF3Hzm9lx6-UUQEWlI4_k1T7CJ330X6GKc"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
