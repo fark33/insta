@@ -1,5 +1,6 @@
 import os
 import time
+import html
 import asyncio
 import logging
 import traceback
@@ -51,22 +52,17 @@ threading.Thread(target=start_http_server, daemon=True).start()
 # ================= منطق دانلود سریع =================
 def download_audio(query: str):
     t_start = time.perf_counter()
-    logger.info(f"⚡ [VERSION 2.2] دریافت درخواست جدید: '{query}'")
+    logger.info(f"⚡ [VERSION 2.3] دریافت درخواست جدید: '{query}'")
 
     download_opts = {
-        # دریافت مستقیم استریم‌های صوتی خالص (جلوگیری از دانلود ویدیوی سنگین MP4)
-        'format': 'bestaudio/ba',
+        # اولویت با فایل صوتی خالص؛ در صورت عدم وجود، سوئیچ به best جهت جلوگیری از خطا
+        'format': 'bestaudio/ba/best',
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
         'cookiefile': COOKIE_FILE,
         'concurrent_fragment_downloads': 4,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios', 'mweb', 'web'],
-            }
-        },
     }
 
     search_target = query if query.startswith("http") else f"ytsearch1:{query}"
@@ -93,7 +89,7 @@ def download_audio(query: str):
         duration = int(entry.get('duration') or 0)
 
         t_total = time.perf_counter() - t_start
-        logger.info(f"⏱️ [yt-dlp] استخراج فایل صوتی خالص در {t_ydl_end - t_ydl_start:.2f} ثانیه (زمان کل پردازش: {t_total:.2f} ثانیه)")
+        logger.info(f"⏱️ [yt-dlp] استخراج فایل در {t_ydl_end - t_ydl_start:.2f} ثانیه (زمان کل پردازش: {t_total:.2f} ثانیه)")
 
         return file_path, {
             "title": title,
@@ -121,7 +117,8 @@ async def handle_music(_, message):
         return
 
     t_req_start = time.perf_counter()
-    status_msg = await message.reply_text(f"🔍 در حال جستجو و دانلود: **{query}** ...")
+    safe_query = html.escape(query)
+    status_msg = await message.reply_text(f"🔍 در حال جستجو و دانلود: <b>{safe_query}</b> ...")
     file_path = None
 
     try:
@@ -131,7 +128,7 @@ async def handle_music(_, message):
         t_dl_done = time.perf_counter()
 
         if result is None:
-            await status_msg.edit_text(f"❌ {meta}")
+            await status_msg.edit_text(f"❌ {html.escape(str(meta))}")
             return
 
         file_path = result
@@ -139,7 +136,11 @@ async def handle_music(_, message):
         artist = meta.get('artist', 'Unknown')
         duration = meta.get('duration', 0)
 
-        await status_msg.edit_text(f"📤 در حال ارسال **{title}** به تلگرام ...")
+        # ایمن‌سازی متون برای جلوگیری از خطاهای ParseMode تلگرام
+        safe_title = html.escape(title)
+        safe_artist = html.escape(artist)
+
+        await status_msg.edit_text(f"📤 در حال ارسال <b>{safe_title}</b> به تلگرام ...")
 
         t_up_start = time.perf_counter()
         await message.reply_audio(
@@ -147,13 +148,13 @@ async def handle_music(_, message):
             title=title,
             performer=artist,
             duration=duration,
-            caption=f"🎵 **{title}**\n👤 {artist}"
+            caption=f"🎵 <b>{safe_title}</b>\n👤 {safe_artist}"
         )
         await status_msg.delete()
         t_up_end = time.perf_counter()
 
         logger.info(
-            f"📊 [گزارش زمان‌بندی V2.2]\n"
+            f"📊 [گزارش زمان‌بندی V2.3]\n"
             f" ├ ⏱️ زمان دانلود: {t_dl_done - t_req_start:.2f} ثانیه\n"
             f" ├ 📤 زمان آپلود: {t_up_end - t_up_start:.2f} ثانیه\n"
             f" └ 🚀 زمان کل: {t_up_end - t_req_start:.2f} ثانیه"
@@ -174,5 +175,5 @@ async def handle_music(_, message):
 
 # ================= اجرا =================
 if __name__ == "__main__":
-    logger.info("🚀 [VERSION 2.2] ربات با پشتیبانی جامع استریم صوتی راه‌اندازی شد...")
+    logger.info("🚀 [VERSION 2.3] ربات با سیستم هوشمند Fallback راه‌اندازی شد...")
     app.run()
