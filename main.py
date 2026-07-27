@@ -41,16 +41,74 @@ def start_http_server():
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود سریع (بدون خطای فرمت) =================
+# ================= تابع دانلود سریع با انتخاب دقیق فرمت =================
 def download_audio_fast(query: str):
     """
-    دانلود سریع با انتخاب خودکار بهترین فرمت صوتی (بدون شرط اضافی)
+    دانلود سریع با انتخاب خودکار بهترین فرمت صوتی موجود (با اولویت m4a و webm)
     """
     try:
         logger.info(f"🔍 شروع دانلود سریع برای: {query}")
 
+        # تنظیمات اولیه برای دریافت اطلاعات (بدون دانلود)
+        info_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'cookiefile': COOKIE_FILE,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web'],
+                }
+            },
+        }
+
+        # ابتدا اطلاعات ویدیو را دریافت می‌کنیم
+        with yt_dlp.YoutubeDL(info_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+            if not info or 'entries' not in info or not info['entries']:
+                return None, "هیچ آهنگی پیدا نشد."
+            entry = info['entries'][0]
+            video_id = entry.get('id')
+            title = entry.get('title', 'Unknown')
+            artist = entry.get('channel') or entry.get('uploader') or 'Unknown'
+            duration = int(entry.get('duration') or 0)
+
+            # دریافت لیست فرمت‌های موجود
+            formats = entry.get('formats', [])
+            if not formats:
+                return None, "فرمت صوتی موجود نیست."
+
+            # انتخاب بهترین فرمت صوتی بر اساس اولویت: m4a > webm > opus > هر چیز دیگر
+            # همچنین سعی می‌کنیم فرمت‌های با بیت‌ریت پایین‌تر (برای سرعت) را انتخاب کنیم
+            preferred_exts = ['m4a', 'webm', 'opus']
+            selected_format = None
+            for ext in preferred_exts:
+                for f in formats:
+                    if f.get('ext') == ext and f.get('acodec') != 'none':
+                        # ترجیح فرمت‌های با بیت‌ریت ≤ 128 کیلوبیت برای سرعت دانلود
+                        if f.get('abr') and f['abr'] <= 128:
+                            selected_format = f
+                            break
+                        if not selected_format:  # اگر با بیت‌ریت کم پیدا نشد، هر فرمت با آن پسوند را بگیر
+                            selected_format = f
+                if selected_format:
+                    break
+
+            # اگر هیچکدام از پسوندهای ترجیحی نبود، هر فرمت صوتی را انتخاب کن
+            if not selected_format:
+                for f in formats:
+                    if f.get('acodec') != 'none':
+                        selected_format = f
+                        break
+
+            if not selected_format:
+                return None, "هیچ فرمت صوتی مناسبی یافت نشد."
+
+            format_id = selected_format['format_id']
+            logger.info(f"✅ انتخاب فرمت: {format_id} با پسوند {selected_format.get('ext')}")
+
+        # اکنون با فرمت انتخاب شده، دانلود را انجام می‌دهیم
         download_opts = {
-            'format': 'bestaudio',           # همیشه بهترین فرمت صوتی موجود
+            'format': format_id,   # استفاده از فرمت دقیق انتخاب‌شده
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
@@ -59,33 +117,24 @@ def download_audio_fast(query: str):
             'socket_timeout': 10,
             'retries': 2,
             'fragment_retries': 2,
-            'concurrent_fragment_downloads': 15,   # افزایش برای سرعت بیشتر
+            'concurrent_fragment_downloads': 15,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             },
             'extractor_args': {
                 'youtube': {
                     'player_client': ['android', 'web'],
-                    # 'skip': ['dash', 'hls'],   # حذف شده تا همه فرمت‌ها بررسی شوند
                 }
             },
-            # در صورت نیاز به MP3، خط زیر را فعال کنید (کیفیت ۱۲۸ برای سرعت)
+            # در صورت نیاز به MP3، خط زیر را فعال کنید (کیفیت ۱۲۸)
             # 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '128'}],
         }
 
         with yt_dlp.YoutubeDL(download_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{query}", download=True)
+            # دانلود با فرمت مشخص
+            ydl.download([entry['webpage_url']])
 
-            if not info or 'entries' not in info or not info['entries']:
-                return None, "هیچ آهنگی پیدا نشد."
-
-            entry = info['entries'][0]
-            title = entry.get('title', 'Unknown')
-            artist = entry.get('channel') or entry.get('uploader') or 'Unknown'
-            duration = int(entry.get('duration') or 0)
-
-            # پیدا کردن فایل دانلود شده (با هر پسوندی)
-            video_id = entry.get('id')
+            # پیدا کردن فایل دانلود شده
             actual_file = None
             for f in os.listdir(DOWNLOAD_DIR):
                 if f.startswith(video_id):
@@ -169,5 +218,5 @@ async def handle_music(_, message):
 
 # ================= اجرا =================
 if __name__ == "__main__":
-    logger.info("🚀 ربات با حالت سریع و بدون خطای فرمت راه‌اندازی شد.")
+    logger.info("🚀 ربات با انتخاب هوشمند فرمت راه‌اندازی شد.")
     app.run()
