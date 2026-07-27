@@ -17,7 +17,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= تنظیمات ربات =================
-# بهتر است این مقادیر را از متغیرهای محیطی (Environment Variables) بخوانی
 API_ID = int(os.environ.get("API_ID", "3335796"))
 API_HASH = os.environ.get("API_HASH", "138b992a0e672e8346d8439c3f42ea78")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "5088657122:AAGGal-y6fXHjtwdD74AxE-dOWzPvcdfSjU")
@@ -42,98 +41,79 @@ def start_http_server():
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود =================
+# ================= تابع دانلود سریع =================
 def download_audio(query: str):
     """
-    جستجو و دانلود اولین نتیجه از یوتیوب به صورت M4A
-    خروجی: (مسیر_فایل، دیکشنری_متادیتا) یا (None، پیام_خطا)
+    جستجو و دانلود مستقیم فرمت نیتیو M4A (فارغ از پردازش سنگین CPU)
     """
     try:
-        logger.info(f"🔍 شروع جستجو برای: {query}")
+        logger.info(f"🔍 شروع دانلود مستقیم برای: {query}")
 
-        # ===== مرحله ۱: جستجو و گرفتن شناسه ویدیو =====
-        search_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'default_search': 'ytsearch',
-            'noplaylist': True,
-            'extract_flat': True,
-            'skip_download': True,
-            'cookiefile': COOKIE_FILE,
-        }
-
-        with yt_dlp.YoutubeDL(search_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
-
-        if not info or not info.get('entries'):
-            return None, "هیچ آهنگی با این نام پیدا نشد."
-
-        entry = info['entries'][0]
-        if not entry:
-            return None, "خطا در دریافت اطلاعات آهنگ."
-
-        # ساخت URL معتبر — در حالت extract_flat ممکن است url خام باشد
-        video_id = entry.get('id')
-        video_url = entry.get('url') or entry.get('webpage_url')
-        if video_url and not str(video_url).startswith('http'):
-            video_url = f"https://www.youtube.com/watch?v={video_url}"
-        if not video_url and video_id:
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-        if not video_url:
-            return None, "آدرس ویدیو پیدا نشد."
-
-        title = entry.get('title', 'Unknown Title')
-        artist = entry.get('channel') or entry.get('uploader') or 'Unknown Artist'
-
-        logger.info(f"✅ پیدا شد: {title} - {artist}")
-
-        # ===== مرحله ۲: دانلود با فرمت انعطاف‌پذیر (خروجی m4a) =====
+        # تنظیمات بهینه‌شده برای حداکثر سرعت روی سرور
         download_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-            }],
+            # فرمت 140 همان M4A نیتیو یوتیوب است (بدون نیاز به Re-encode با FFmpeg)
+            'format': '140/ba[ext=m4a]/ba',
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
-            # فقط کلاینت tv را امتحان کن — همان چیزی است که فرمت نهایی را می‌دهد؛
-            # حذف web_safari/tv_downgraded چند درخواست شبکه‌ی اضافه را حذف می‌کند
+            'socket_timeout': 10,
+            'retries': 3,
+            # استفاده از کلاینت‌های بسیار سریع و بدون بن دیتاسنتر
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['tv'],
+                    'player_client': ['android', 'web'],
                 }
             },
-            # اجازه می‌دهیم yt-dlp خودش بین ytdlp-jsc (سریع، بدون پروسه‌ی جدا) و deno انتخاب کند
-            # توجه: ignoreerrors را عمداً حذف کردیم تا خطای واقعی دیده شود
         }
 
-        with yt_dlp.YoutubeDL(download_opts) as ydl_download:
-            logger.info(f"⬇️ شروع دانلود: {title}")
-            dl_info = ydl_download.extract_info(video_url, download=True)
-            # مسیر فایل نهایی بعد از تبدیل به m4a (بدون اسکن پوشه)
-            base_name = ydl_download.prepare_filename(dl_info)
-            file_path = os.path.splitext(base_name)[0] + '.m4a'
-            duration = int(dl_info.get('duration') or entry.get('duration') or 0)
+        with yt_dlp.YoutubeDL(download_opts) as ydl:
+            # ۱. جستجو و استخراج اطلاعات
+            info = ydl.extract_info(f"ytsearch1:{query}", download=True)
 
-        if os.path.exists(file_path):
-            logger.info(f"✅ دانلود موفق: {title} - {artist}")
-            return file_path, {
-                "title": title,
-                "artist": artist,
-                "duration": duration,
-            }
+            if not info or 'entries' not in info or not info['entries']:
+                return None, "هیچ آهنگی با این نام پیدا نشد."
 
-        return None, "فایل دانلود شده یافت نشد."
+            entry = info['entries'][0]
+            if not entry:
+                return None, "خطا در دریافت اطلاعات آهنگ."
+
+            title = entry.get('title', 'Unknown Title')
+            artist = entry.get('channel') or entry.get('uploader') or 'Unknown Artist'
+            duration = int(entry.get('duration') or 0)
+
+            # ۲. پیدا کردن دقیق مسیر فایل ایجاد شده روی دیسک
+            expected_filename = ydl.prepare_filename(entry)
+            
+            # برسی چند حالت مختلف برای جلوگیری از خطای File Not Found
+            actual_file = None
+            if os.path.exists(expected_filename):
+                actual_file = expected_filename
+            else:
+                # جستجو بر اساس ID ویدیو در پوشه دانلود
+                video_id = entry.get('id')
+                for f in os.listdir(DOWNLOAD_DIR):
+                    if f.startswith(video_id):
+                        actual_file = os.path.join(DOWNLOAD_DIR, f)
+                        break
+
+            if actual_file and os.path.exists(actual_file):
+                logger.info(f"✅ دانلود سریع انجام شد: {title} (مسیر: {actual_file})")
+                return actual_file, {
+                    "title": title,
+                    "artist": artist,
+                    "duration": duration,
+                }
+
+            return None, "فایل دانلود شده روی سرور یافت نشد."
 
     except yt_dlp.utils.DownloadError as e:
         msg = str(e)
         logger.error(f"❌ خطای دانلود yt-dlp: {msg}")
         if 'Sign in to confirm' in msg or 'bot' in msg.lower() or 'cookies' in msg.lower():
             return None, "یوتیوب درخواست را بلاک کرد. فایل cookies.txt را بروز کن."
-        return None, "دانلود ناموفق بود (فرمت موجود نیست یا ویدیو محدود است)."
+        return None, "دانلود ناموفق بود (ویدیو محدود است یا یافت نشد)."
 
     except Exception as e:
         logger.error(f"❌ خطا در دانلود: {str(e)}")
@@ -156,7 +136,7 @@ async def handle_music(_, message):
     if not query:
         return
 
-    status_msg = await message.reply_text(f"🔍 در حال جستجو برای: **{query}** ...")
+    status_msg = await message.reply_text(f"🔍 در حال جستجو و دانلود: **{query}** ...")
     file_path = None
 
     try:
@@ -189,7 +169,7 @@ async def handle_music(_, message):
 
         except RPCError as e:
             logger.error(f"❌ خطا در ارسال به تلگرام: {e}")
-            await status_msg.edit_text("❌ خطا در ارسال فایل: احتمالاً حجم فایل زیاد است یا اینترنت قطع است.")
+            await status_msg.edit_text("❌ خطا در ارسال فایل به تلگرام.")
 
     except Exception as e:
         logger.error(f"❌ خطای غیرمنتظره: {str(e)}")
@@ -197,6 +177,7 @@ async def handle_music(_, message):
         await status_msg.edit_text("❌ یک خطای غیرمنتظره رخ داد. لطفاً دوباره تلاش کنید.")
 
     finally:
+        # پاکسازی هوشمند تمام فایل‌های باقی‌مانده مربوط به این دانلود
         try:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
