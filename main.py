@@ -41,36 +41,35 @@ def start_http_server():
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود سریع =================
+# ================= تابع دانلود سریع (بدون خطای فرمت) =================
 def download_audio_fast(query: str):
     """
-    دانلود سریع با اولویت کیفیت پایین و حذف تبدیل (خروجی همان فرمت اصلی)
+    دانلود سریع با انتخاب خودکار بهترین فرمت صوتی (بدون شرط اضافی)
     """
     try:
         logger.info(f"🔍 شروع دانلود سریع برای: {query}")
 
         download_opts = {
-            # انتخاب بهترین فرمت با بیت‌ریت ≤۱۲۸ (حجم کم) - در صورت نبود، bestaudio
-            'format': 'bestaudio[abr<=128]/bestaudio',
+            'format': 'bestaudio',           # همیشه بهترین فرمت صوتی موجود
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
-            'socket_timeout': 10,                # قطع سریع در صورت کندی
+            'socket_timeout': 10,
             'retries': 2,
             'fragment_retries': 2,
-            'concurrent_fragment_downloads': 10, # دانلود همزمان قطعات
+            'concurrent_fragment_downloads': 15,   # افزایش برای سرعت بیشتر
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             },
             'extractor_args': {
                 'youtube': {
                     'player_client': ['android', 'web'],
-                    'skip': ['dash', 'hls'],     # رد کردن فرمت‌های زمان‌بر
+                    # 'skip': ['dash', 'hls'],   # حذف شده تا همه فرمت‌ها بررسی شوند
                 }
             },
-            # در صورت نیاز به تبدیل به MP3، خط زیر را فعال کنید (کیفیت ۱۲۸):
+            # در صورت نیاز به MP3، خط زیر را فعال کنید (کیفیت ۱۲۸ برای سرعت)
             # 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '128'}],
         }
 
@@ -85,7 +84,7 @@ def download_audio_fast(query: str):
             artist = entry.get('channel') or entry.get('uploader') or 'Unknown'
             duration = int(entry.get('duration') or 0)
 
-            # پیدا کردن فایل دانلود شده
+            # پیدا کردن فایل دانلود شده (با هر پسوندی)
             video_id = entry.get('id')
             actual_file = None
             for f in os.listdir(DOWNLOAD_DIR):
@@ -170,5 +169,5 @@ async def handle_music(_, message):
 
 # ================= اجرا =================
 if __name__ == "__main__":
-    logger.info("🚀 ربات با حالت سریع راه‌اندازی شد.")
+    logger.info("🚀 ربات با حالت سریع و بدون خطای فرمت راه‌اندازی شد.")
     app.run()
