@@ -41,39 +41,42 @@ def start_http_server():
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود سریع (اصلاح‌شده) =================
-def download_audio(query: str):
+# ================= تابع دانلود و تبدیل به MP3 =================
+def download_audio_as_mp3(query: str):
     """
-    جستجو و دانلود بهترین فرمت صوتی موجود با اولویت m4a و سپس سایر فرمت‌ها
+    جستجو، دانلود بهترین فرمت صوتی و تبدیل خودکار به MP3
     """
     try:
-        logger.info(f"🔍 شروع دانلود مستقیم برای: {query}")
+        logger.info(f"🔍 شروع دانلود برای: {query} (تبدیل به MP3)")
 
-        # تنظیمات بهینه‌شده برای سرعت بالا و سازگاری بیشتر
         download_opts = {
-            # اولویت: فرمت 140 (m4a) در غیر این صورت بهترین فرمت صوتی با پسوند m4a، و نهایتاً هر bestaudio
-            'format': '140/bestaudio[ext=m4a]/bestaudio',
+            'format': 'bestaudio/best',   # بهترین کیفیت صوتی
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
-            'socket_timeout': 30,                     # افزایش تایم‌اوت برای اتصالات کند
-            'retries': 5,                             # تلاش مجدد برای کل دانلود
-            'fragment_retries': 5,                    # تلاش مجدد برای قطعات
-            'concurrent_fragment_downloads': 5,       # دانلود همزمان قطعات برای افزایش سرعت
+            'socket_timeout': 20,
+            'retries': 3,
+            'fragment_retries': 3,
+            'concurrent_fragment_downloads': 5,
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],  # کلاینت‌های کم‌تر بن‌شونده
+                    'player_client': ['android', 'web'],
                 }
             },
+            # ========== پس‌پردازش برای تبدیل به MP3 ==========
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',   # کیفیت ۱۹۲ کیلوبیت بر ثانیه
+            }],
         }
 
         with yt_dlp.YoutubeDL(download_opts) as ydl:
-            # ۱. جستجو و دانلود
             info = ydl.extract_info(f"ytsearch1:{query}", download=True)
 
             if not info or 'entries' not in info or not info['entries']:
@@ -87,27 +90,32 @@ def download_audio(query: str):
             artist = entry.get('channel') or entry.get('uploader') or 'Unknown Artist'
             duration = int(entry.get('duration') or 0)
 
-            # ۲. پیدا کردن مسیر فایل دانلود شده
-            expected_filename = ydl.prepare_filename(entry)
+            # پس از تبدیل، نام فایل به .mp3 تغییر می‌کند، بنابراین باید جستجو کنیم
+            video_id = entry.get('id')
             actual_file = None
-            if os.path.exists(expected_filename):
-                actual_file = expected_filename
-            else:
-                video_id = entry.get('id')
-                for f in os.listdir(DOWNLOAD_DIR):
-                    if f.startswith(video_id):
-                        actual_file = os.path.join(DOWNLOAD_DIR, f)
-                        break
+            for f in os.listdir(DOWNLOAD_DIR):
+                # فایل نهایی ممکن است با id شروع شود و پسوند mp3 داشته باشد
+                if f.startswith(video_id) and f.endswith('.mp3'):
+                    actual_file = os.path.join(DOWNLOAD_DIR, f)
+                    break
+
+            if not actual_file:
+                # اگر به هر دلیل پیدا نشد، فایل اصلی را چک می‌کنیم (احتمالاً تبدیل نشده)
+                expected = ydl.prepare_filename(entry)
+                if os.path.exists(expected):
+                    actual_file = expected
+                else:
+                    return None, "فایل MP3 ساخته نشد."
 
             if actual_file and os.path.exists(actual_file):
-                logger.info(f"✅ دانلود سریع انجام شد: {title} (مسیر: {actual_file})")
+                logger.info(f"✅ دانلود و تبدیل به MP3 انجام شد: {title} (مسیر: {actual_file})")
                 return actual_file, {
                     "title": title,
                     "artist": artist,
                     "duration": duration,
                 }
 
-            return None, "فایل دانلود شده روی سرور یافت نشد."
+            return None, "فایل نهایی یافت نشد."
 
     except yt_dlp.utils.DownloadError as e:
         msg = str(e)
@@ -126,7 +134,7 @@ def download_audio(query: str):
 async def start(_, message):
     await message.reply_text(
         "👋 سلام!\n"
-        "نام آهنگ مورد نظرت را بنویس تا دانلود کنم.\n"
+        "نام آهنگ مورد نظرت را بنویس تا به صورت MP3 دانلود کنم.\n"
         "مثال: `Shape of You`"
     )
 
@@ -137,13 +145,13 @@ async def handle_music(_, message):
     if not query:
         return
 
-    status_msg = await message.reply_text(f"🔍 در حال جستجو و دانلود: **{query}** ...")
+    status_msg = await message.reply_text(f"🔍 در حال جستجو و دانلود (تبدیل به MP3): **{query}** ...")
     file_path = None
 
     try:
         logger.info(f"📩 درخواست جدید از کاربر {message.from_user.id}: {query}")
 
-        result, meta = await asyncio.to_thread(download_audio, query)
+        result, meta = await asyncio.to_thread(download_audio_as_mp3, query)
 
         if result is None:
             await status_msg.edit_text(f"❌ {meta}")
@@ -155,7 +163,7 @@ async def handle_music(_, message):
         artist = meta.get('artist', 'Unknown')
         duration = meta.get('duration', 0)
 
-        await status_msg.edit_text(f"📤 در حال ارسال **{title}** ...")
+        await status_msg.edit_text(f"📤 در حال ارسال **{title}** (MP3) ...")
 
         try:
             await message.reply_audio(
@@ -163,10 +171,10 @@ async def handle_music(_, message):
                 title=title,
                 performer=artist,
                 duration=duration,
-                caption=f"🎵 **{title}**\n👤 {artist}"
+                caption=f"🎵 **{title}**\n👤 {artist}\n📀 MP3"
             )
             await status_msg.delete()
-            logger.info(f"✅ فایل '{title}' برای کاربر {message.from_user.id} ارسال شد.")
+            logger.info(f"✅ فایل MP3 '{title}' برای کاربر {message.from_user.id} ارسال شد.")
 
         except RPCError as e:
             logger.error(f"❌ خطا در ارسال به تلگرام: {e}")
@@ -178,15 +186,20 @@ async def handle_music(_, message):
         await status_msg.edit_text("❌ یک خطای غیرمنتظره رخ داد. لطفاً دوباره تلاش کنید.")
 
     finally:
-        # پاکسازی هوشمند فایل موقت
+        # پاکسازی فایل‌های نهایی و موقت
         try:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
-                logger.info(f"🗑️ فایل موقت {file_path} پاک شد.")
+                logger.info(f"🗑️ فایل MP3 {file_path} پاک شد.")
+            # همچنین فایل‌های موقت دیگر (پسوندهای دیگر) را پاک کن
+            for f in os.listdir(DOWNLOAD_DIR):
+                if f.endswith(('.m4a', '.webm', '.opus', '.aac')):
+                    os.remove(os.path.join(DOWNLOAD_DIR, f))
+                    logger.info(f"🗑️ فایل موقت {f} پاک شد.")
         except Exception as e:
             logger.warning(f"⚠️ خطا در پاکسازی فایل: {e}")
 
 # ================= اجرای ربات =================
 if __name__ == "__main__":
-    logger.info("🚀 ربات راه‌اندازی شد...")
+    logger.info("🚀 ربات با قابلیت تبدیل به MP3 راه‌اندازی شد...")
     app.run()
