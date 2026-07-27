@@ -41,35 +41,39 @@ def start_http_server():
 
 threading.Thread(target=start_http_server, daemon=True).start()
 
-# ================= تابع دانلود سریع =================
+# ================= تابع دانلود سریع (اصلاح‌شده) =================
 def download_audio(query: str):
     """
-    جستجو و دانلود مستقیم فرمت نیتیو M4A (فارغ از پردازش سنگین CPU)
+    جستجو و دانلود بهترین فرمت صوتی موجود با اولویت m4a و سپس سایر فرمت‌ها
     """
     try:
         logger.info(f"🔍 شروع دانلود مستقیم برای: {query}")
 
-        # تنظیمات بهینه‌شده برای حداکثر سرعت روی سرور
+        # تنظیمات بهینه‌شده برای سرعت بالا و سازگاری بیشتر
         download_opts = {
-            # فرمت 140 همان M4A نیتیو یوتیوب است (بدون نیاز به Re-encode با FFmpeg)
-            'format': '140/ba[ext=m4a]/ba',
+            # اولویت: فرمت 140 (m4a) در غیر این صورت بهترین فرمت صوتی با پسوند m4a، و نهایتاً هر bestaudio
+            'format': '140/bestaudio[ext=m4a]/bestaudio',
             'outtmpl': os.path.join(DOWNLOAD_DIR, '%(id)s.%(ext)s'),
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
             'cookiefile': COOKIE_FILE,
-            'socket_timeout': 10,
-            'retries': 3,
-            # استفاده از کلاینت‌های بسیار سریع و بدون بن دیتاسنتر
+            'socket_timeout': 30,                     # افزایش تایم‌اوت برای اتصالات کند
+            'retries': 5,                             # تلاش مجدد برای کل دانلود
+            'fragment_retries': 5,                    # تلاش مجدد برای قطعات
+            'concurrent_fragment_downloads': 5,       # دانلود همزمان قطعات برای افزایش سرعت
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'web'],
+                    'player_client': ['android', 'web'],  # کلاینت‌های کم‌تر بن‌شونده
                 }
             },
         }
 
         with yt_dlp.YoutubeDL(download_opts) as ydl:
-            # ۱. جستجو و استخراج اطلاعات
+            # ۱. جستجو و دانلود
             info = ydl.extract_info(f"ytsearch1:{query}", download=True)
 
             if not info or 'entries' not in info or not info['entries']:
@@ -83,15 +87,12 @@ def download_audio(query: str):
             artist = entry.get('channel') or entry.get('uploader') or 'Unknown Artist'
             duration = int(entry.get('duration') or 0)
 
-            # ۲. پیدا کردن دقیق مسیر فایل ایجاد شده روی دیسک
+            # ۲. پیدا کردن مسیر فایل دانلود شده
             expected_filename = ydl.prepare_filename(entry)
-            
-            # برسی چند حالت مختلف برای جلوگیری از خطای File Not Found
             actual_file = None
             if os.path.exists(expected_filename):
                 actual_file = expected_filename
             else:
-                # جستجو بر اساس ID ویدیو در پوشه دانلود
                 video_id = entry.get('id')
                 for f in os.listdir(DOWNLOAD_DIR):
                     if f.startswith(video_id):
@@ -177,7 +178,7 @@ async def handle_music(_, message):
         await status_msg.edit_text("❌ یک خطای غیرمنتظره رخ داد. لطفاً دوباره تلاش کنید.")
 
     finally:
-        # پاکسازی هوشمند تمام فایل‌های باقی‌مانده مربوط به این دانلود
+        # پاکسازی هوشمند فایل موقت
         try:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
